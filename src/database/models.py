@@ -25,6 +25,16 @@ class SessionStatus(str, Enum):
     PAUSED = "paused"
 
 
+class BlockType(str, Enum):
+    LEAD = "lead"
+    PARAGRAPH = "paragraph"
+    LIST_ITEM = "list_item"
+    TABLE_ROWS = "table_rows"
+    QUOTE = "quote"
+    FIGURE_CAPTION = "figure_caption"
+    MIXED = "mixed"
+
+
 class Article(SQLModel, table=True):
     """Model for storing scraped wiki articles and parsed results."""
 
@@ -107,16 +117,49 @@ class ScrapingSession(SQLModel, table=True):
         self.error_message = error
 
 
-# Optional: chunk storage for embeddings (use soon)
 class Chunk(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    article_id: int = Field(foreign_key="article.id", index=True)
-    section_path: Optional[str] = Field(
-        default=None
-    )  # JSON-encoded list, e.g. '["History","13th Black Crusade"]'
-    paragraph_idx: Optional[int] = Field(default=None)
-    text: str = Field()
-    token_count: Optional[int] = Field(default=None)
-    # embedding: Optional[bytes] = Field(default=None)  # if you later store vectors as blob
+    """
+    Structure-aware chunk suitable for embedding + Qdrant payload.
 
-    # article: Article = Relationship(back_populates="chunks")  # temporarily commented out
+    Store the minimal text needed for rendering/debug (`text`) and the
+    exact string you embed (`embedding_input`) if you want perfect reproducibility.
+    Use `chunk_uid` as the deterministic ID (also use as Qdrant point ID).
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # Deterministic ID for idempotent upserts (also Qdrant point ID)
+    chunk_uid: str = Field(index=True, unique=True)
+
+    # Foreign key & denorm for fast filtering
+    article_id: int = Field(foreign_key="article.id", index=True)
+    article_title: str = Field(index=True)
+    canonical_url: str = Field(index=True)
+
+    # Section/breadcrumb
+    section_path: str = Field(
+        index=True
+    )  # JSON-encoded list[str], e.g. '["History","13th Black Crusade"]'
+    block_type: BlockType = Field(default=BlockType.PARAGRAPH, index=True)
+
+    # Ordering and micro-block mapping (for rebuilds/debug)
+    chunk_index: int = Field(index=True)  # order within the article
+    micro_start: int = Field()  # first micro-index in section
+    micro_end: int = Field()  # last micro-index in section
+
+    # Texts
+    text: str = Field()  # body-only (what you display)
+    embedding_input: Optional[str] = Field(default=None)  # header+body (what you embed)
+
+    # Hints & metrics
+    token_count: Optional[int] = Field(default=None, index=True)
+    kv_preview: Optional[str] = Field(default=None)  # "Affiliation=..., Founding=..."
+    lead: bool = Field(default=False, index=True)
+    parser_version: Optional[str] = Field(default=None, index=True)
+
+    # Optional: link graph/lightweight flags
+    links_out: Optional[str] = Field(default=None)  # JSON list[str], optional
+    active: bool = Field(default=True, index=True)  # for soft deletes
+
+    created_at: datetime = Field(default_factory=datetime.now, index=True)
+    updated_at: datetime = Field(default_factory=datetime.now, index=True)

@@ -145,7 +145,7 @@ class ArticleDatabase:
         """Return articles whose parsed_json is missing or stale."""
         with next(self.db_manager.get_session()) as session:
             stmt = select(Article).where(Article.status == ScrapingStatus.SUCCESS)
-            
+
             # Articles need parsing if ANY of these conditions are true:
             parse_conditions = [
                 # Never parsed
@@ -155,16 +155,19 @@ class ArticleDatabase:
                 # Content changed since last parse
                 Article.last_parsed_html_hash != Article.content_hash,
             ]
-            
+
             # Parser version changed (if provided)
             if parser_version:
-                parse_conditions.extend([
-                    Article.parser_version == None,  # type: ignore[arg-type]
-                    Article.parser_version != parser_version,
-                ])
-            
+                parse_conditions.extend(
+                    [
+                        Article.parser_version == None,  # type: ignore[arg-type]
+                        Article.parser_version != parser_version,
+                    ]
+                )
+
             # Combine all conditions with OR
             from sqlmodel import or_
+
             stmt = stmt.where(or_(*parse_conditions))
             stmt = stmt.limit(limit)
             return list(session.exec(stmt))
@@ -199,34 +202,6 @@ class ArticleDatabase:
             session.commit()
             session.refresh(article)
             return article
-
-    # -------- optional: chunk ops (you can wire later) --------
-
-    def upsert_chunks(self, article_id: int, chunks: Iterable[dict]) -> int:
-        """Replace chunks for an article with the provided list."""
-        with next(self.db_manager.get_session()) as session:
-            # delete old
-            old = session.exec(
-                select(Chunk).where(Chunk.article_id == article_id)
-            ).all()
-            for c in old:
-                session.delete(c)
-            session.commit()
-
-            # insert new
-            inserted = 0
-            for ch in chunks:
-                row = Chunk(
-                    article_id=article_id,
-                    section_path=ch.get("section_path"),
-                    paragraph_idx=ch.get("paragraph_idx"),
-                    text=ch["text"],
-                    token_count=ch.get("token_count"),
-                )
-                session.add(row)
-                inserted += 1
-            session.commit()
-            return inserted
 
 
 class SessionDatabase:
@@ -312,3 +287,184 @@ class SessionDatabase:
                 ScrapingSession.session_status == SessionStatus.RUNNING
             )
             return list(session.exec(statement))
+
+
+class ChunkDatabase:
+    """Database operations for article chunks."""
+
+    def __init__(self, db_manager: DatabaseManager):
+        self.db_manager = db_manager
+
+    def save_chunks(self, chunks: List[Chunk]) -> int:
+        """Save chunks to database with conflict resolution.
+        
+        Args:
+            chunks: List of Chunk instances to save
+            
+        Returns:
+            Number of chunks successfully saved
+        """
+        if not chunks:
+            return 0
+        
+        saved_count = 0
+        with next(self.db_manager.get_session()) as session:
+            for chunk in chunks:
+                try:
+                    # Check if chunk already exists
+                    existing = session.exec(
+                        select(Chunk).where(Chunk.chunk_uid == chunk.chunk_uid)
+                    ).first()
+                    
+                    if existing:
+                        # Update existing chunk
+                        existing.text = chunk.text
+                        existing.embedding_input = chunk.embedding_input
+                        existing.token_count = chunk.token_count
+                        existing.updated_at = datetime.now()
+                        session.add(existing)
+                    else:
+                        # Add new chunk
+                        session.add(chunk)
+                    
+                    saved_count += 1
+                    
+                except Exception as e:
+                    print(f"⚠️  Failed to save chunk {chunk.chunk_uid[:16]}...: {e}")
+                    continue
+            
+            session.commit()
+        
+        return saved_count
+
+    def get_chunks_by_article_id(self, article_id: int) -> List[Chunk]:
+        """Get all chunks for a specific article.
+        
+        Args:
+            article_id: Article ID to get chunks for
+            
+        Returns:
+            List of chunks for the article
+        """
+        with next(self.db_manager.get_session()) as session:
+            statement = select(Chunk).where(
+                Chunk.article_id == article_id
+            ).order_by(Chunk.chunk_index.asc()) # type: ignore
+            return list(session.exec(statement))
+
+    def clear_chunks_for_article(self, article_id: int) -> int:
+        """Remove all chunks for a specific article.
+        
+        Args:
+            article_id: Article ID to clear chunks for
+            
+        Returns:
+            Number of chunks removed
+        """
+        with next(self.db_manager.get_session()) as session:
+            chunks_to_delete = session.exec(
+                select(Chunk).where(Chunk.article_id == article_id)
+            ).all()
+            
+            count = len(chunks_to_delete)
+            for chunk in chunks_to_delete:
+                session.delete(chunk)
+            
+            session.commit()
+            return count
+
+    def get_chunking_stats(self) -> dict:
+        """Get statistics about chunks in the database.
+        
+        Returns:
+            Dictionary with chunking statistics
+        """
+        with next(self.db_manager.get_session()) as session:
+            all_chunks = session.exec(select(Chunk)).all()
+            
+            if not all_chunks:
+                return {
+                    "total_chunks": 0,
+                    "unique_articles": 0,
+                    "avg_chunks_per_article": 0.0,
+                    "avg_token_count": 0.0,
+                    "token_distribution": {},
+                    "block_type_distribution": {},
+                }
+            
+            # Calculate statistics
+            unique_articles = len(set(chunk.article_id for chunk in all_chunks))
+            avg_chunks_per_article = len(all_chunks) / max(1, unique_articles)
+            
+            # Token statistics
+            token_counts = [chunk.token_count for chunk in all_chunks if chunk.token_count]
+            avg_token_count = sum(token_counts) / max(1, len(token_counts))
+            
+            # Token distribution
+            token_ranges = {
+                "0-100": 0,
+                "101-250": 0, 
+                "251-350": 0,
+                "351-500": 0,
+                "500+": 0
+            }
+            
+            for token_count in token_counts:
+                if token_count <= 100:
+                    token_ranges["0-100"] += 1
+                elif token_count <= 250:
+                    token_ranges["101-250"] += 1
+                elif token_count <= 350:
+                    token_ranges["251-350"] += 1
+                elif token_count <= 500:
+                    token_ranges["351-500"] += 1
+                else:
+                    token_ranges["500+"] += 1
+            
+            # Block type distribution
+            block_types = {}
+            for chunk in all_chunks:
+                block_type = str(chunk.block_type)
+                block_types[block_type] = block_types.get(block_type, 0) + 1
+            
+            return {
+                "total_chunks": len(all_chunks),
+                "unique_articles": unique_articles,
+                "avg_chunks_per_article": avg_chunks_per_article,
+                "avg_token_count": avg_token_count,
+                "token_distribution": token_ranges,
+                "block_type_distribution": block_types,
+            }
+
+    def get_articles_needing_chunks(self, limit: int = 100) -> List[int]:
+        """Get article IDs that need chunks generated.
+        
+        Args:
+            limit: Maximum number of article IDs to return
+            
+        Returns:
+            List of article IDs that need chunking
+        """
+        with next(self.db_manager.get_session()) as session:
+            # Get all articles with parsed JSON
+            parsed_articles = session.exec(
+                select(Article.id).where(
+                    (Article.status == ScrapingStatus.SUCCESS) &
+                    (Article.parsed_json != None)  # type: ignore[arg-type]
+                )
+            ).all()
+            
+            # Get articles that already have chunks
+            chunked_articles = session.exec(
+                select(Chunk.article_id).distinct()
+            ).all()
+            
+            chunked_set = set(chunked_articles)
+            
+            # Find articles needing chunks - filter out None values
+            needing_chunks = [
+                article_id for article_id in parsed_articles
+                if article_id is not None and article_id not in chunked_set
+            ]
+            
+            return needing_chunks[:limit]
