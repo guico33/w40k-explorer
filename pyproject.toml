@@ -9,21 +9,22 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     "aiohttp>=3.9.0",
     "tqdm>=4.66.0",
-    
     # RAG and AI
     "langchain>=0.1.0",
     "langchain-openai>=0.1.0",
     "openai>=1.12.0",
     "qdrant-client>=1.7.0",
     "tiktoken>=0.6.0",
-    
     # UI
     "streamlit>=1.31.0",
     "streamlit-chat>=0.1.1",
-    
     # Utilities
     "pandas>=2.2.0",
     "python-dotenv>=1.0.0",
+    "sqlalchemy>=2.0.43",
+    "sqlmodel>=0.0.24",
+    "lxml>=6.0.0",
+    "types-beautifulsoup4>=4.12.0.20250516",
 ]
 
 [project.optional-dependencies]
