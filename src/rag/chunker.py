@@ -108,7 +108,6 @@ class Micro:
     text: str
     section_path: Tuple[str, ...]  # immutable path for grouping
     block_type: BlockType
-    micro_idx: int  # order within the section scope
 
 
 # -----------------
@@ -172,7 +171,7 @@ def _yield_micro_from_container(
         if not txt:
             continue
         yield from _maybe_split_micro(
-            txt, path, BlockType.PARAGRAPH, i, params, tk_count
+            txt, path, BlockType.PARAGRAPH, params, tk_count
         )
 
     # lists: items as individual micros
@@ -183,7 +182,7 @@ def _yield_micro_from_container(
             if not txt:
                 continue
             yield from _maybe_split_micro(
-                txt, path, BlockType.LIST_ITEM, i, params, tk_count
+                txt, path, BlockType.LIST_ITEM, params, tk_count
             )
 
     # quotes
@@ -191,7 +190,7 @@ def _yield_micro_from_container(
         txt = (q or "").strip()
         if not txt:
             continue
-        yield from _maybe_split_micro(txt, path, BlockType.QUOTE, i, params, tk_count)
+        yield from _maybe_split_micro(txt, path, BlockType.QUOTE, params, tk_count)
 
     # tables -> group rows
     for t in container.get("tables", []) or []:
@@ -205,7 +204,7 @@ def _yield_micro_from_container(
                 continue
             # Use hard split for table rows only when extremely large
             yield from _maybe_split_micro(
-                txt, path, BlockType.TABLE_ROWS, i, params, tk_count
+                txt, path, BlockType.TABLE_ROWS, params, tk_count
             )
 
     # figures (optional)
@@ -221,7 +220,6 @@ def _yield_micro_from_container(
                 text=cap,
                 section_path=path,
                 block_type=BlockType.FIGURE_CAPTION,
-                micro_idx=i,
             )
 
 
@@ -229,18 +227,17 @@ def _maybe_split_micro(
     text: str,
     path: Tuple[str, ...],
     btype: BlockType,
-    idx: int,
     params: ChunkParams,
     tk_count,
 ) -> Iterator[Micro]:
     # if text too big, sentence split until each piece <= max_tokens_per_micro
     if tk_count(text) <= params.max_tokens_per_micro:
-        yield Micro(text=text, section_path=path, block_type=btype, micro_idx=idx)
+        yield Micro(text=text, section_path=path, block_type=btype)
         return
     # sentence split
     sentences = _split_sentences(text)
     if not sentences:
-        yield Micro(text=text, section_path=path, block_type=btype, micro_idx=idx)
+        yield Micro(text=text, section_path=path, block_type=btype)
         return
     acc: List[str] = []
     acc_tokens = 0
@@ -248,7 +245,7 @@ def _maybe_split_micro(
         st = tk_count(s)
         if acc and acc_tokens + st > params.max_tokens_per_micro:
             yield Micro(
-                text=" ".join(acc), section_path=path, block_type=btype, micro_idx=idx
+                text=" ".join(acc), section_path=path, block_type=btype
             )
             acc, acc_tokens = [s], st
         else:
@@ -256,7 +253,7 @@ def _maybe_split_micro(
             acc_tokens += st
     if acc:
         yield Micro(
-            text=" ".join(acc), section_path=path, block_type=btype, micro_idx=idx
+            text=" ".join(acc), section_path=path, block_type=btype
         )
 
 
@@ -286,8 +283,6 @@ def _walk_sections(
 class Packed:
     section_path: Tuple[str, ...]
     block_types: List[BlockType]
-    micro_start: int
-    micro_end: int
     text: str  # body-only
     token_count: int
 
@@ -323,8 +318,6 @@ def _pack_micros(
                 Packed(
                     section_path=section,
                     block_types=btypes,
-                    micro_start=micros[start].micro_idx,
-                    micro_end=micros[i - 1].micro_idx,
                     text=body,
                     token_count=tok,
                 )
@@ -406,7 +399,6 @@ def chunk_article(parsed: dict, params: Optional[ChunkParams] = None) -> List[Ch
                 text=lead_text,
                 section_path=("lead",),
                 block_type=BlockType.LEAD,
-                micro_idx=0,
             )
         )
 
@@ -421,8 +413,8 @@ def chunk_article(parsed: dict, params: Optional[ChunkParams] = None) -> List[Ch
         _walk_sections(parsed.get("sections") or [], tuple(), params, tk_count) or []
     )
 
-    # Sort micros by (section_path, micro_idx) to ensure deterministic order
-    micros.sort(key=lambda m: (m.section_path, m.micro_idx))
+    # Sort micros by section_path to ensure deterministic order
+    micros.sort(key=lambda m: m.section_path)
 
     # Pack
     packed = _pack_micros(micros, params, tk_count)
@@ -434,14 +426,14 @@ def chunk_article(parsed: dict, params: Optional[ChunkParams] = None) -> List[Ch
         return json.dumps(list(path), ensure_ascii=False)
 
     def _make_uid(
-        url: str, path: Tuple[str, ...], micro_start: int, embedding_input: str
+        url: str, path: Tuple[str, ...], chunk_index: int, embedding_input: str
     ) -> str:
         h = hashlib.sha1()
         h.update(url.encode("utf-8"))
         h.update(b"|")
         h.update("||".join(path).encode("utf-8"))
         h.update(b"|")
-        h.update(str(micro_start).encode("utf-8"))
+        h.update(str(chunk_index).encode("utf-8"))
         h.update(b"|")
         h.update(hashlib.sha1(embedding_input.encode("utf-8")).digest())
         return h.hexdigest()
@@ -487,7 +479,7 @@ def chunk_article(parsed: dict, params: Optional[ChunkParams] = None) -> List[Ch
         chunk_uid = _make_uid(
             canonical_url or str(article_id),
             p.section_path,
-            p.micro_start,
+            chunk_counter,
             embedding_input,
         )
 
@@ -500,8 +492,6 @@ def chunk_article(parsed: dict, params: Optional[ChunkParams] = None) -> List[Ch
                 section_path=_encode_path(p.section_path),
                 block_type=block_type,
                 chunk_index=chunk_counter,
-                micro_start=p.micro_start,
-                micro_end=p.micro_end,
                 text=p.text,
                 embedding_input=embedding_input,
                 token_count=p.token_count,
@@ -558,7 +548,6 @@ if __name__ == "__main__":
                 "section_path": json.loads(c.section_path),
                 "block_type": getattr(c.block_type, "value", str(c.block_type)),
                 "chunk_index": c.chunk_index,
-                "micro_range": [c.micro_start, c.micro_end],
                 "token_count": c.token_count,
                 "kv_preview": c.kv_preview,
                 "lead": c.lead,

@@ -308,8 +308,6 @@ class QdrantVectorStore:
                             str(chunk.block_type).split(".")[-1].lower(),
                         ),
                         "chunk_index": chunk.chunk_index,
-                        "micro_start": chunk.micro_start,
-                        "micro_end": chunk.micro_end,
                         "text": chunk.text,
                         "embedding_input": chunk.embedding_input,
                         "token_count": chunk.token_count,

@@ -86,7 +86,7 @@ def generate_chunks(
     print(f"🔧 Chunk parameters:")
     print(f"   Target tokens: {params.target_tokens}")
     print(f"   Overlap tokens: {params.overlap_tokens}")
-    print(f"   Max tokens per micro: {params.max_tokens_per_micro}")
+    print(f"   Max tokens per block: {params.max_tokens_per_micro}")
     
     # Get current chunk statistics
     current_stats = chunk_db.get_chunking_stats()

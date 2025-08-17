@@ -142,10 +142,8 @@ class Chunk(SQLModel, table=True):
     )  # JSON-encoded list[str], e.g. '["History","13th Black Crusade"]'
     block_type: BlockType = Field(default=BlockType.PARAGRAPH, index=True)
 
-    # Ordering and micro-block mapping (for rebuilds/debug)
+    # Ordering within the article
     chunk_index: int = Field(index=True)  # order within the article
-    micro_start: int = Field()  # first micro-index in section
-    micro_end: int = Field()  # last micro-index in section
 
     # Texts
     text: str = Field()  # body-only (what you display)
