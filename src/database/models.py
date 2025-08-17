@@ -161,5 +161,13 @@ class Chunk(SQLModel, table=True):
     links_out: Optional[str] = Field(default=None)  # JSON list[str], optional
     active: bool = Field(default=True, index=True)  # for soft deletes
 
+    # Embedding tracking
+    has_embedding: bool = Field(default=False, index=True)
+    embedding_generated_at: Optional[datetime] = Field(default=None, index=True)
+    
+    # Error tracking
+    embedding_failed_count: int = Field(default=0)
+    last_embedding_error: Optional[str] = Field(default=None)
+
     created_at: datetime = Field(default_factory=datetime.now, index=True)
     updated_at: datetime = Field(default_factory=datetime.now, index=True)
