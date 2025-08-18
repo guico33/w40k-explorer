@@ -28,14 +28,14 @@ class VectorOperations:
 
     def __init__(
         self,
-        db_manager: DatabaseManager,
+        db_manager: Optional[DatabaseManager],
         vector_store: QdrantVectorStore,
         embedding_generator: EmbeddingGenerator,
     ):
         """Initialize vector operations.
 
         Args:
-            db_manager: Database manager for SQLite operations
+            db_manager: Database manager for SQLite operations (None for Qdrant-only mode)
             vector_store: Qdrant vector store instance
             embedding_generator: Embedding generator instance
         """
@@ -55,6 +55,9 @@ class VectorOperations:
         Returns:
             List of chunks that need embeddings
         """
+        if self.db_manager is None:
+            raise RuntimeError("SQLite is not configured. This method requires database access.")
+        
         with next(self.db_manager.get_session()) as session:
             query = select(Chunk).where(Chunk.active == True)
 
@@ -94,6 +97,9 @@ class VectorOperations:
         Returns:
             Dictionary with processing statistics
         """
+        if self.db_manager is None:
+            raise RuntimeError("SQLite is not configured. This method requires database access.")
+        
         # Get chunks to process
         if chunks is None:
             print("🔍 Finding chunks that need embeddings...")
@@ -313,25 +319,35 @@ class VectorOperations:
         Returns:
             Dictionary with embedding statistics
         """
-        # Get SQLite chunk stats
-        with next(self.db_manager.get_session()) as session:
-            total_chunks = len(session.exec(select(Chunk)).all())
-            active_chunks = len(
-                session.exec(select(Chunk).where(Chunk.active == True)).all()
-            )
-
         # Get Qdrant stats
         collection_info = self.vector_store.get_collection_info() or {}
+        embeddings_count = int(collection_info.get("points_count", 0))
+
+        # Get SQLite chunk stats if available
+        total_chunks = active_chunks = None
+        if self.db_manager is not None:
+            with next(self.db_manager.get_session()) as session:
+                total_chunks = len(session.exec(select(Chunk)).all())
+                active_chunks = len(
+                    session.exec(select(Chunk).where(Chunk.active == True)).all()
+                )
 
         # Calculate coverage
-        embeddings_count = collection_info.get("points_count", 0)
-        coverage = (embeddings_count / active_chunks) * 100 if active_chunks > 0 else 0
+        if active_chunks is not None and active_chunks > 0:
+            # SQLite available: calculate actual coverage
+            coverage = (embeddings_count / active_chunks) * 100
+        elif embeddings_count > 0:
+            # Qdrant-only mode: assume 100% coverage of available data
+            coverage = 100.0
+        else:
+            # No data available
+            coverage = 0.0
 
         return {
             "total_chunks_sqlite": total_chunks,
             "active_chunks_sqlite": active_chunks,
             "embeddings_in_qdrant": embeddings_count,
-            "coverage_percentage": coverage,
+            "coverage_percentage": float(coverage),
             "collection_status": collection_info.get("status", "unknown"),
             "vector_size": collection_info.get("vector_size", 0),
             "distance_metric": collection_info.get("distance", "unknown"),
@@ -345,6 +361,10 @@ class VectorOperations:
         Returns:
             Number of embeddings removed
         """
+        if self.db_manager is None:
+            print("ℹ️  SQLite not configured - skipping inactive cleanup")
+            return 0
+        
         print("🧹 Finding inactive chunks to remove from Qdrant...")
 
         with next(self.db_manager.get_session()) as session:
@@ -383,6 +403,9 @@ class VectorOperations:
         Returns:
             Dictionary with sync statistics
         """
+        if self.db_manager is None:
+            raise RuntimeError("SQLite is not configured. This method requires database access.")
+        
         print("🔄 Synchronizing embeddings between SQLite and Qdrant...")
 
         if force_recreate:

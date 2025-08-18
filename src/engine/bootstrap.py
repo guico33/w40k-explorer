@@ -50,6 +50,7 @@ def setup_query_engine(
     expand_queries: int = 0,
     lower_threshold_on_empty: bool = True,
     active_only: bool = True,
+    use_sqlite: bool = True,
 ) -> Tuple["SimpleQueryEngine", Dict]:
     """Initialize and return configured query engine with stats.
     
@@ -62,23 +63,24 @@ def setup_query_engine(
         expand_queries: Number of query expansions to generate (0 disables)
         lower_threshold_on_empty: Relax threshold when no hits found
         active_only: Only search active chunks
+        use_sqlite: Whether to use SQLite (if False, uses Qdrant-only mode)
         
     Returns:
         Tuple of (engine, stats_dict)
         
     Raises:
-        FileNotFoundError: If database doesn't exist
         Exception: If initialization fails
     """
     # Import here to avoid circular import issues
     from src.engine.query_engine import SimpleQueryEngine
     
-    # Check database exists
-    if not Path(db_path).exists():
-        raise FileNotFoundError(f"Database not found: {db_path}")
+    # Decide if we will use SQLite
+    will_use_sqlite = use_sqlite and Path(db_path).exists()
     
-    # Initialize database manager
-    db_manager = DatabaseManager(db_path)
+    # Initialize database manager if available
+    db_manager = None
+    if will_use_sqlite:
+        db_manager = DatabaseManager(db_path)
     
     # Initialize Qdrant vector store
     qdrant_url = os.getenv("QDRANT_URL")
@@ -122,7 +124,7 @@ def setup_query_engine(
         active_only=active_only,
     )
     
-    # Get collection stats
+    # Get collection stats (now safe even without DB)
     stats = {}
     try:
         embedding_stats = vec_ops.get_embedding_stats()
@@ -131,15 +133,16 @@ def setup_query_engine(
             "coverage_percentage": embedding_stats.get("coverage_percentage", 0),
             "model": engine.model,
             "connection_info": connection_info,
-            "db_path": db_path,
+            "db_path": db_path if will_use_sqlite else "N/A (Qdrant-only mode)",
         }
-    except Exception:
+    except Exception as e:
         stats = {
             "chunks_count": "unknown",
             "coverage_percentage": 0,
             "model": engine.model,
             "connection_info": connection_info,
-            "db_path": db_path,
+            "db_path": db_path if will_use_sqlite else "N/A (Qdrant-only mode)",
+            "error": str(e),
         }
     
     return engine, stats

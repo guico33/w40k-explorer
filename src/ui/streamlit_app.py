@@ -48,10 +48,15 @@ def get_query_engine():
     """Initialize and cache the query engine."""
     try:
         with st.spinner("🔄 Initializing query engine..."):
-            engine, stats = setup_query_engine()
+            # Auto-detect SQLite availability
+            use_sqlite = Path("data/articles.db").exists()
+            engine, stats = setup_query_engine(use_sqlite=use_sqlite)
 
         # Display initialization success
-        st.success("✅ Query engine initialized successfully!")
+        if use_sqlite:
+            st.success("✅ Query engine initialized successfully!")
+        else:
+            st.success("✅ Query engine initialized (Qdrant-only mode)!")
 
         # Show stats in sidebar
         with st.sidebar:
@@ -60,12 +65,14 @@ def get_query_engine():
             st.metric("Coverage", f"{stats['coverage_percentage']:.1f}%")
             st.info(f"**Model**: {stats['model']}")
             st.info(f"**Connection**: {stats['connection_info']}")
+            if not use_sqlite:
+                st.info("🔧 **Mode**: Qdrant-only (no SQLite)")
 
         return engine
 
     except Exception as e:
         st.error(f"❌ **Initialization Error**: {str(e)}")
-        st.info("Please ensure your database exists and all services are running.")
+        st.info("Please check your Qdrant connection and environment variables.")
         st.stop()
 
 
