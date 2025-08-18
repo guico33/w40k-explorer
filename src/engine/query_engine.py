@@ -1,29 +1,16 @@
 import json
 import logging
 import os
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
 
 from openai import OpenAI
 
 from ..database.vector_operations import VectorOperations
+from .types import QueryResult
 from .utils import format_section_path, truncate_text
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class QueryResult:
-    """Structured result from query engine."""
-
-    answer: str
-    citations: List[Dict[str, str]]
-    confidence: float
-    sources_used: int
-    from_cache: bool = False
-    query_time_ms: int = 0
-    error: Optional[str] = None
 
 
 class SimpleQueryEngine:
@@ -422,6 +409,8 @@ Provide your response following the required JSON structure."""
                                 citations=[],
                                 confidence=float(partial_json.get("confidence", 0.5)),
                                 sources_used=len(context_items),
+                                citations_used=partial_json.get("citations_used", []),
+                                context_items=context_items,
                                 error="truncated",
                             )
 
@@ -434,6 +423,7 @@ Provide your response following the required JSON structure."""
                                     ctx = context_items[cid]
                                     citations.append(
                                         {
+                                            "id": cid,
                                             "title": ctx["article"],
                                             "section": ctx["section"],
                                             "url": ctx["url"],
@@ -545,6 +535,7 @@ Provide your response following the required JSON structure."""
                     ctx = context_items[cid]
                     citations.append(
                         {
+                            "id": cid,
                             "title": ctx["article"],
                             "section": ctx["section"],
                             "url": ctx["url"],
@@ -558,6 +549,8 @@ Provide your response following the required JSON structure."""
                     max(float(result_json.get("confidence", 0.5)), 0.0), 1.0
                 ),
                 sources_used=len(context_items),
+                citations_used=result_json.get("citations_used", []),
+                context_items=context_items,
             )
 
         except json.JSONDecodeError as e:
@@ -727,6 +720,7 @@ Provide a compressed response following the required JSON structure."""
                             ctx = context_items[cid]
                             citations.append(
                                 {
+                                    "id": cid,
                                     "title": ctx["article"],
                                     "section": ctx["section"],
                                     "url": ctx["url"],
@@ -742,6 +736,8 @@ Provide a compressed response following the required JSON structure."""
                             max(float(result_json.get("confidence", 0.3)), 0.0), 1.0
                         ),
                         sources_used=len(context_items),
+                        citations_used=result_json.get("citations_used", []),
+                        context_items=context_items,
                         error="compressed_retry",
                     )
                 except json.JSONDecodeError as e:

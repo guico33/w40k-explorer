@@ -35,7 +35,7 @@ class BlockType(str, Enum):
     MIXED = "mixed"
 
 
-class Article(SQLModel, table=True):
+class Article(SQLModel, table=True, extend_existing=True):
     """Model for storing scraped wiki articles and parsed results."""
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -87,7 +87,7 @@ class Article(SQLModel, table=True):
         return decompressed_bytes.decode("utf-8")
 
 
-class ScrapingSession(SQLModel, table=True):
+class ScrapingSession(SQLModel, table=True, extend_existing=True):
     """Model for tracking scraping sessions."""
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -117,7 +117,7 @@ class ScrapingSession(SQLModel, table=True):
         self.error_message = error
 
 
-class Chunk(SQLModel, table=True):
+class Chunk(SQLModel, table=True, extend_existing=True):
     """
     Structure-aware chunk suitable for embedding + Qdrant payload.
 

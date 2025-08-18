@@ -75,3 +75,5 @@ htmlcov/
 
 # uv
 .uv/
+
+screenshots/
