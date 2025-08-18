@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from sqlmodel import select
 
@@ -87,7 +87,7 @@ class VectorOperations:
 
         Args:
             chunks: Specific chunks to process (if None, get chunks needing embeddings)
-            batch_size: Batch size for processing
+            batch_size: Batch size for processing embeddings and uploads
             max_chunks: Maximum number of chunks to process
             retry_failed: If True, include chunks that previously failed
 
@@ -113,86 +113,109 @@ class VectorOperations:
             chunks = chunks[:max_chunks]
             print(f"🔢 Limited to {max_chunks:,} chunks for processing")
 
-        print(f"📊 Processing {len(chunks):,} chunks")
+        print(f"📊 Processing {len(chunks):,} chunks in batches of {batch_size}")
 
         # Estimate cost
         cost_estimate = self.embedding_generator.estimate_cost(len(chunks))
         print(f"💰 Estimated cost: ${cost_estimate['estimated_cost_usd']:.4f}")
 
-        # Generate embeddings
-        chunks_with_embeddings = self.embedding_generator.process_chunks(chunks)
+        # Initialize tracking variables
+        total_successful_embeddings = []
+        total_failed_chunks = []
+        total_uploaded = 0
 
-        # Process results and update database tracking
-        successful_embeddings = []
-        failed_chunks = []
+        # Process chunks in batches
+        for i in range(0, len(chunks), batch_size):
+            batch_chunks = chunks[i:i + batch_size]
+            batch_num = i // batch_size + 1
+            total_batches = (len(chunks) + batch_size - 1) // batch_size
+            
+            print(f"🔄 Processing batch {batch_num}/{total_batches} ({len(batch_chunks)} chunks)")
 
-        with next(self.db_manager.get_session()) as session:
-            for chunk, embedding in chunks_with_embeddings:
-                if embedding is not None:
-                    successful_embeddings.append((chunk, embedding))
-                    # Mark as successful in database
-                    chunk.has_embedding = True
-                    chunk.embedding_generated_at = datetime.now()
-                    chunk.last_embedding_error = None
-                    session.add(chunk)
-                else:
-                    failed_chunks.append(chunk)
-                    # Mark as failed in database
-                    chunk.embedding_failed_count += 1
-                    chunk.last_embedding_error = (
-                        f"Failed to generate embedding at {datetime.now()}"
-                    )
-                    session.add(chunk)
+            # Generate embeddings for this batch
+            chunks_with_embeddings = self.embedding_generator.process_chunks(batch_chunks)
 
-            # Before committing, detach chunks from session to avoid lazy loading issues
-            for chunk, embedding in successful_embeddings:
-                session.expunge(chunk)  # Detach from session but keep data
+            # Process results and update database tracking for this batch
+            batch_successful_embeddings = []
+            batch_failed_chunks = []
 
-            session.commit()
+            with next(self.db_manager.get_session()) as session:
+                for chunk, embedding in chunks_with_embeddings:
+                    if embedding is not None:
+                        batch_successful_embeddings.append((chunk, embedding))
+                        # Mark as successful in database
+                        chunk.has_embedding = True
+                        chunk.embedding_generated_at = datetime.now()
+                        chunk.last_embedding_error = None
+                        session.add(chunk)
+                    else:
+                        batch_failed_chunks.append(chunk)
+                        # Mark as failed in database
+                        chunk.embedding_failed_count += 1
+                        chunk.last_embedding_error = (
+                            f"Failed to generate embedding at {datetime.now()}"
+                        )
+                        session.add(chunk)
 
-        print(f"🎯 Generated embeddings for {len(successful_embeddings):,} chunks")
-        if failed_chunks:
-            print(f"❌ Failed to generate embeddings for {len(failed_chunks):,} chunks")
+                # Before committing, detach chunks from session to avoid lazy loading issues
+                for chunk, embedding in batch_successful_embeddings:
+                    session.expunge(chunk)  # Detach from session but keep data
 
-        if not successful_embeddings:
+                session.commit()
+
+            print(f"   ✅ Generated {len(batch_successful_embeddings)} embeddings")
+            if batch_failed_chunks:
+                print(f"   ❌ Failed to generate {len(batch_failed_chunks)} embeddings")
+
+            # Store this batch in Qdrant if we have successful embeddings
+            if batch_successful_embeddings:
+                print(f"   📤 Uploading {len(batch_successful_embeddings)} embeddings to Qdrant...")
+                batch_uploaded_count, batch_successful_point_ids = self.vector_store.upsert_chunks(
+                    batch_successful_embeddings, batch_size=batch_size
+                )
+                total_uploaded += batch_uploaded_count
+
+                # Update database for failed uploads in this batch
+                if batch_uploaded_count < len(batch_successful_embeddings):
+                    print(f"   ⚠️  Only {batch_uploaded_count}/{len(batch_successful_embeddings)} uploaded")
+                    # Mark failed uploads by checking which chunks are NOT in successful_point_ids
+                    successful_ids_set = set(batch_successful_point_ids)
+                    with next(self.db_manager.get_session()) as session:
+                        for chunk, _ in batch_successful_embeddings:
+                            if chunk.chunk_uid not in successful_ids_set:
+                                # This chunk failed to upload
+                                chunk.has_embedding = False
+                                chunk.embedding_failed_count += 1
+                                chunk.last_embedding_error = (
+                                    f"Failed to upload to Qdrant at {datetime.now()}"
+                                )
+                                session.add(chunk)
+                        session.commit()
+
+            # Accumulate totals
+            total_successful_embeddings.extend(batch_successful_embeddings)
+            total_failed_chunks.extend(batch_failed_chunks)
+
+        # Final summary
+        print(f"🎯 Total embeddings generated: {len(total_successful_embeddings):,}")
+        if total_failed_chunks:
+            print(f"❌ Total failed embeddings: {len(total_failed_chunks):,}")
+        print(f"📤 Total uploaded to Qdrant: {total_uploaded:,}")
+
+        if not total_successful_embeddings:
             return {
                 "total_processed": len(chunks),
                 "successful_embeddings": 0,
                 "successful_uploads": 0,
-                "failed_embeddings": len(failed_chunks),
+                "failed_embeddings": len(total_failed_chunks),
             }
-
-        # Store in Qdrant
-        print("📤 Uploading embeddings to Qdrant...")
-        uploaded_count, successful_point_ids = self.vector_store.upsert_chunks(
-            successful_embeddings, batch_size=batch_size
-        )
-
-        # Update database for successfully uploaded embeddings
-        if uploaded_count < len(successful_embeddings):
-            print(
-                f"⚠️  Only {uploaded_count}/{len(successful_embeddings)} embeddings uploaded to Qdrant"
-            )
-            # Mark failed uploads by checking which chunks are NOT in successful_point_ids
-            successful_ids_set = set(successful_point_ids)
-            with next(self.db_manager.get_session()) as session:
-                for chunk, _ in successful_embeddings:
-                    if chunk.chunk_uid not in successful_ids_set:
-                        # This chunk failed to upload
-                        chunk.has_embedding = False
-                        chunk.embedding_failed_count += 1
-                        chunk.last_embedding_error = (
-                            f"Failed to upload to Qdrant at {datetime.now()}"
-                        )
-                        session.add(chunk)
-                session.commit()
 
         # Get final statistics
         stats = self.embedding_generator.get_stats()
         additional_stats = {
             "total_processed": len(chunks),
-            "successful_uploads": uploaded_count,
-            "failed_embeddings": len(failed_chunks),
+            "successful_uploads": total_uploaded,
+            "failed_embeddings": len(total_failed_chunks),
             "collection_info": self.vector_store.get_collection_info(),
         }
         stats.update(additional_stats)

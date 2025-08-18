@@ -51,7 +51,7 @@ packages = ["src"]
 target-version = "py311"
 line-length = 88
 select = ["E", "W", "F", "I", "B", "C4", "ARG", "SIM"]
-ignore = ["E501", "W503"]
+ignore = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"
