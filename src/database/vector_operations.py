@@ -126,14 +126,18 @@ class VectorOperations:
 
         # Process chunks in batches
         for i in range(0, len(chunks), batch_size):
-            batch_chunks = chunks[i:i + batch_size]
+            batch_chunks = chunks[i : i + batch_size]
             batch_num = i // batch_size + 1
             total_batches = (len(chunks) + batch_size - 1) // batch_size
-            
-            print(f"🔄 Processing batch {batch_num}/{total_batches} ({len(batch_chunks)} chunks)")
+
+            print(
+                f"🔄 Processing batch {batch_num}/{total_batches} ({len(batch_chunks)} chunks)"
+            )
 
             # Generate embeddings for this batch
-            chunks_with_embeddings = self.embedding_generator.process_chunks(batch_chunks)
+            chunks_with_embeddings = self.embedding_generator.process_chunks(
+                batch_chunks
+            )
 
             # Process results and update database tracking for this batch
             batch_successful_embeddings = []
@@ -169,15 +173,21 @@ class VectorOperations:
 
             # Store this batch in Qdrant if we have successful embeddings
             if batch_successful_embeddings:
-                print(f"   📤 Uploading {len(batch_successful_embeddings)} embeddings to Qdrant...")
-                batch_uploaded_count, batch_successful_point_ids = self.vector_store.upsert_chunks(
-                    batch_successful_embeddings, batch_size=batch_size
+                print(
+                    f"   📤 Uploading {len(batch_successful_embeddings)} embeddings to Qdrant..."
+                )
+                batch_uploaded_count, batch_successful_point_ids = (
+                    self.vector_store.upsert_chunks(
+                        batch_successful_embeddings, batch_size=batch_size
+                    )
                 )
                 total_uploaded += batch_uploaded_count
 
                 # Update database for failed uploads in this batch
                 if batch_uploaded_count < len(batch_successful_embeddings):
-                    print(f"   ⚠️  Only {batch_uploaded_count}/{len(batch_successful_embeddings)} uploaded")
+                    print(
+                        f"   ⚠️  Only {batch_uploaded_count}/{len(batch_successful_embeddings)} uploaded"
+                    )
                     # Mark failed uploads by checking which chunks are NOT in successful_point_ids
                     successful_ids_set = set(batch_successful_point_ids)
                     with next(self.db_manager.get_session()) as session:
@@ -230,6 +240,7 @@ class VectorOperations:
         block_types: Optional[List[str]] = None,
         lead_only: Optional[bool] = None,
         min_score: Optional[float] = None,
+        active_only: bool = True,
     ) -> List[Dict]:
         """Search for semantically similar chunks.
 
@@ -240,6 +251,7 @@ class VectorOperations:
             block_types: Filter by block types
             lead_only: Filter for lead paragraphs only
             min_score: Minimum similarity score threshold
+            active_only: If True, only search active chunks
 
         Returns:
             List of search results with chunk data and scores
@@ -255,7 +267,7 @@ class VectorOperations:
             article_ids=article_ids,
             block_types=block_types,
             lead_only=lead_only,
-            active_only=True,
+            active_only=active_only,
         )
 
         # Search in Qdrant
@@ -272,7 +284,10 @@ class VectorOperations:
             payload = result.payload or {}
             formatted_results.append(
                 {
-                    "chunk_uid": result.id,
+                    "point_id": result.id,  # Keep Qdrant point ID for debugging
+                    "chunk_uid": payload.get(
+                        "chunk_uid"
+                    ),  # FIX: Use original chunk UID
                     "score": result.score,
                     "article_id": payload.get("article_id"),
                     "article_title": payload.get("article_title"),
@@ -283,6 +298,10 @@ class VectorOperations:
                     "canonical_url": payload.get("canonical_url"),
                     "token_count": payload.get("token_count"),
                     "kv_preview": payload.get("kv_preview"),
+                    "kv_data": payload.get("kv_data"),  # ADD: Expose structured KV data
+                    "links_out": payload.get(
+                        "links_out"
+                    ),  # ADD: For future link expansion
                 }
             )
 
@@ -349,7 +368,10 @@ class VectorOperations:
                 return 0
 
     def sync_embeddings(
-        self, force_recreate: bool = False, retry_failed: bool = False, max_chunks: Optional[int] = None
+        self,
+        force_recreate: bool = False,
+        retry_failed: bool = False,
+        max_chunks: Optional[int] = None,
     ) -> Dict:
         """Synchronize embeddings between SQLite and Qdrant.
 
@@ -389,7 +411,9 @@ class VectorOperations:
         )
 
         # Generate embeddings for missing chunks
-        sync_stats = self.generate_and_store_embeddings(retry_failed=retry_failed, max_chunks=max_chunks)
+        sync_stats = self.generate_and_store_embeddings(
+            retry_failed=retry_failed, max_chunks=max_chunks
+        )
 
         # Clean up inactive embeddings
         removed_count = self.cleanup_inactive_embeddings()

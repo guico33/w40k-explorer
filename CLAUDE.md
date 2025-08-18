@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Implement only what's needed, when it's needed
 - Avoid premature optimization and unnecessary features
 - Use standard library and well-established patterns
+- Regularly check for pylance errors using ide integration
 
 ## Git Commit Guidelines
 
