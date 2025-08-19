@@ -9,6 +9,11 @@ from ..core.models import QueryResult
 from ..ports.llm_client import LLMClient
 from ..ports.vector_operations import VectorOperationsPort
 from .utils import format_section_path, truncate_text
+from .prompts import (
+    build_system_prompt,
+    build_compressed_prompt,
+    build_query_expansion_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,10 @@ class AnswerService:
         query_expansion_n: int = 0,
         lower_threshold_on_empty: bool = True,
         active_only: bool = True,
+        max_answer_sentences: int = 10,
+        compressed_max_sentences: int = 3,
+        max_answer_chars: int = 3000,
+        compressed_max_chars: int = 600,
     ):
         """Initialize answer service.
 
@@ -66,6 +75,10 @@ class AnswerService:
         self.query_expansion_n = max(0, int(query_expansion_n or 0))
         self.lower_threshold_on_empty = lower_threshold_on_empty
         self.active_only = active_only
+        self.max_answer_sentences = max(1, int(max_answer_sentences))
+        self.compressed_max_sentences = max(1, int(compressed_max_sentences))
+        self.max_answer_chars = max(1, int(max_answer_chars))
+        self.compressed_max_chars = max(1, int(compressed_max_chars))
 
     def answer_query(self, question: str) -> QueryResult:
         """Generate an answer to a user query.
@@ -201,13 +214,7 @@ class AnswerService:
         semantically diverse reformulations, including British/American spelling
         variants and common aliases/titles.
         """
-        prompt = f"""
-Propose alternative search queries that capture synonyms, aliases, and spelling variants.
-Domain: Warhammer 40K.
-Original question: {question}
-Include British/American spellings (favored/favoured), titles (Warmaster), and entity names.
-Return ONLY a JSON array of up to {n} short query strings.
-"""
+        prompt = build_query_expansion_prompt(question, n)
         response = self.llm_client.generate_structured_response(
             input_messages=[{"role": "user", "content": prompt}],
             model=self.model,
@@ -331,18 +338,7 @@ Return ONLY a JSON array of up to {n} short query strings.
         """Generate answer using GPT with structured output."""
 
         # System prompt - concise and strict
-        system_prompt = """You are a pan-galactic archivist in M41, compiling a neutral chronicle from Imperial, xenos, and heretical sources under containment.
-
-STRICT RULES:
-1. Answer ONLY from the provided context passages.
-2. Cite sources with bracketed numeric IDs at the END of EACH sentence, using the context item id: [ID]. Example: "Horus was named Warmaster." [3]
-   - Do NOT use any other format (no [id:3], (3), superscripts, or prose citations).
-3. If information is not in context, explicitly say so.
-4. Be precise with names, dates, and factions.
-5. Use in‑universe tone when appropriate.
-6. If context has kv_facts, prioritize those for entity attributes.
-7. Keep the answer to AT MOST 10 sentences total.
-8. The entire answer must fit under ~3000 characters."""
+        system_prompt = build_system_prompt(self.max_answer_sentences, self.max_answer_chars)
 
         # Format context for prompt
         context_str = json.dumps(context_items, ensure_ascii=False, indent=2)
@@ -372,8 +368,8 @@ Provide your response following the required JSON structure."""
                             "properties": {
                                 "answer": {
                                     "type": "string",
-                                    "description": "≤10 sentences, each ending with [ID] matching context id; concise.",
-                                    "maxLength": 3000,
+                                    "description": f"≤{self.max_answer_sentences} sentences, each ending with [ID] matching context id; concise.",
+                                    "maxLength": self.max_answer_chars,
                                 },
                                 "citations_used": {
                                     "type": "array",
@@ -637,14 +633,7 @@ Provide your response following the required JSON structure."""
         """Last resort: retry with compressed constraints for extremely verbose queries."""
         logger.info(f"Attempting compression retry for query: {question[:50]}...")
         # Use stricter limits for compression retry
-        compressed_prompt = """You are a pan-galactic archivist in M41, compiling a neutral chronicle from Imperial, xenos, and heretical sources under containment.
-
-STRICT RULES:
-1. Answer ONLY from the provided context passages.
-2. Cite sources with bracketed numeric IDs at the END of EACH sentence, using the context item id: [ID]. Example: "Horus was named Warmaster." [3]
-   - Do NOT use any other format (no [id:3], (3), superscripts).
-3. Keep the answer to EXACTLY 3 sentences or fewer.
-4. Be extremely concise and direct."""
+        compressed_prompt = build_compressed_prompt(self.compressed_max_sentences)
 
         context_str = json.dumps(context_items, ensure_ascii=False, indent=2)
         user_prompt = f"""Question: {question}
@@ -671,8 +660,8 @@ Provide a compressed response following the required JSON structure."""
                             "properties": {
                                 "answer": {
                                     "type": "string",
-                                    "description": "≤3 sentences with [id] citations",
-                                    "maxLength": 600,
+                                    "description": f"≤{self.compressed_max_sentences} sentences with [ID] citations",
+                                    "maxLength": self.compressed_max_chars,
                                 },
                                 "citations_used": {
                                     "type": "array",
