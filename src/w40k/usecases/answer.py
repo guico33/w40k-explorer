@@ -1,25 +1,25 @@
+"""Answer generation use case - core business logic for answering queries."""
+
 import json
 import logging
-import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from openai import OpenAI
-
-from ..database.vector_operations import VectorOperations
-from .types import QueryResult
+from ..core.models import QueryResult
+from ..ports.vector_operations import VectorOperationsPort
+from ..ports.llm_client import LLMClient
 from .utils import format_section_path, truncate_text
 
 logger = logging.getLogger(__name__)
 
 
-class SimpleQueryEngine:
-    """Minimal viable query engine for W40K lore questions."""
+class AnswerService:
+    """Service for generating answers to user queries using RAG."""
 
     def __init__(
         self,
-        vec_ops: VectorOperations,
-        openai_client: OpenAI,
+        vector_operations: VectorOperationsPort,
+        llm_client: LLMClient,
         model: Optional[str] = None,
         initial_k: int = 60,
         max_context_chunks: int = 12,
@@ -30,31 +30,32 @@ class SimpleQueryEngine:
         lower_threshold_on_empty: bool = True,
         active_only: bool = True,
     ):
-        """Initialize query engine.
+        """Initialize answer service.
 
         Args:
-            vec_ops: Vector operations instance for similarity search
-            openai_client: OpenAI client instance
+            vector_operations: Vector operations for similarity search
+            llm_client: LLM client instance
             model: LLM model to use (if None, reads from OPENAI_LLM_MODEL env var)
             initial_k: Number of initial chunks to retrieve
             max_context_chunks: Maximum chunks to include in context
             min_similarity_score: Minimum similarity score threshold
             max_tokens: Maximum tokens for LLM response
+            context_max_words: Max words per context chunk
+            query_expansion_n: Number of query expansions to generate
+            lower_threshold_on_empty: Relax threshold when no hits found
+            active_only: Only search active chunks
 
         Raises:
             ValueError: If model is None and OPENAI_LLM_MODEL env var is not set
         """
-        self.vec_ops = vec_ops
-        self.client = openai_client
+        self.vec_ops = vector_operations
+        self.llm_client = llm_client
 
-        # Use provided model or read from environment variable
-        if model:
-            self.model = model
-        else:
-            env_model = os.getenv("OPENAI_LLM_MODEL")
-            if not env_model:
-                raise ValueError("OPENAI_LLM_MODEL environment variable is required")
-            self.model = env_model
+        # Require explicit model (should be provided by Settings via factory)
+        if not model:
+            raise ValueError("Model is required. Pass settings.openai_llm_model to AnswerService.")
+        self.model = model
+
         self.initial_k = initial_k
         self.max_context_chunks = max_context_chunks
         self.min_similarity_score = min_similarity_score
@@ -64,8 +65,15 @@ class SimpleQueryEngine:
         self.lower_threshold_on_empty = lower_threshold_on_empty
         self.active_only = active_only
 
-    def query(self, question: str) -> QueryResult:
-        """Main entry point for queries."""
+    def answer_query(self, question: str) -> QueryResult:
+        """Generate an answer to a user query.
+        
+        Args:
+            question: User's question
+            
+        Returns:
+            QueryResult with answer, citations, and metadata
+        """
         start_time = datetime.now()
 
         try:
@@ -198,10 +206,10 @@ Original question: {question}
 Include British/American spellings (favored/favoured), titles (Warmaster), and entity names.
 Return ONLY a JSON array of up to {n} short query strings.
 """
-        response = self.client.responses.create(
+        response = self.llm_client.generate_structured_response(
+            input_messages=[{"role": "user", "content": prompt}],
             model=self.model,
-            input=[{"role": "user", "content": prompt}],
-            text={
+            text_format={
                 "format": {
                     "type": "json_schema",
                     "name": "queries",
@@ -344,14 +352,14 @@ Context passages:
 Provide your response following the required JSON structure."""
 
         try:
-            # Use new Responses API with proper JSON schema
-            response = self.client.responses.create(
-                model=self.model,
-                input=[
+            # Use structured LLM client with proper JSON schema
+            response = self.llm_client.generate_structured_response(
+                input_messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                text={
+                model=self.model,
+                text_format={
                     "format": {
                         "type": "json_schema",
                         "name": "query_result",
@@ -620,23 +628,6 @@ Provide your response following the required JSON structure."""
         logger.warning("No extractable text found in response")
         return None
 
-    def _try_parse_query_result_json(
-        self, text: Optional[str]
-    ) -> Optional[QueryResult]:
-        """Try to parse potentially truncated JSON response."""
-        if not text:
-            return None
-        try:
-            obj = json.loads(text)
-            return QueryResult(
-                answer=obj.get("answer", ""),
-                citations=[],  # Will be rebuilt from citations_used
-                confidence=float(obj.get("confidence", 0.5)),
-                sources_used=0,  # Will be set by caller
-            )
-        except Exception:
-            return None
-
     def _retry_compressed(
         self, question: str, context_items: List[Dict]
     ) -> QueryResult:
@@ -660,13 +651,13 @@ Context passages:
 Provide a compressed response following the required JSON structure."""
 
         try:
-            response = self.client.responses.create(
-                model=self.model,
-                input=[
+            response = self.llm_client.generate_structured_response(
+                input_messages=[
                     {"role": "system", "content": compressed_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                text={
+                model=self.model,
+                text_format={
                     "format": {
                         "type": "json_schema",
                         "name": "query_result",

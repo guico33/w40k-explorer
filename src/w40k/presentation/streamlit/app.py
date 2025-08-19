@@ -1,7 +1,5 @@
-"""Warhammer 40K Knowledge Base - Streamlit Chat Interface."""
+"""Streamlit app for the W40K Knowledge Base - New Architecture."""
 
-import sys
-from pathlib import Path
 from typing import Optional
 
 import streamlit as st
@@ -10,19 +8,14 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Ensure project root is on sys.path and use absolute package imports
-repo_root = Path(__file__).resolve().parents[2]
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
-
-# Import our modules using the package root
-from src.engine.bootstrap import setup_query_engine, validate_environment
-from src.engine.types import QueryResult
-from src.ui.utils import format_sources_with_sequential_numbering
+from ...config.factory import create_answer_service, validate_environment
+from ...config.settings import get_settings
+from ...core.models import QueryResult
+from .utils import format_sources_with_sequential_numbering
 
 
 def initialize_app():
-    """Initialize the Streamlit app with page config and environment validation."""
+    """Initialize the Streamlit app."""
     st.set_page_config(
         page_title="Warhammer 40K Knowledge Base",
         page_icon="⚔️",
@@ -44,19 +37,20 @@ def initialize_app():
 
 
 @st.cache_resource
-def get_query_engine():
-    """Initialize and cache the query engine."""
+def get_answer_service():
+    """Initialize and cache the answer service."""
     try:
-        with st.spinner("🔄 Initializing query engine..."):
-            # Auto-detect SQLite availability
-            use_sqlite = Path("data/articles.db").exists()
-            engine, stats = setup_query_engine(use_sqlite=use_sqlite)
+        with st.spinner("🔄 Initializing knowledge base..."):
+            # Auto-detect SQLite availability via Settings
+            settings = get_settings()
+            use_sqlite = settings.db_exists()
+            answer_service, stats = create_answer_service(use_sqlite=use_sqlite)
 
         # Display initialization success
         if use_sqlite:
-            st.success("✅ Query engine initialized successfully!")
+            st.success("✅ Knowledge base initialized successfully!")
         else:
-            st.success("✅ Query engine initialized (Qdrant-only mode)!")
+            st.success("✅ Knowledge base initialized (Qdrant-only mode)!")
 
         # Show stats in sidebar
         with st.sidebar:
@@ -68,7 +62,7 @@ def get_query_engine():
             if not use_sqlite:
                 st.info("🔧 **Mode**: Qdrant-only (no SQLite)")
 
-        return engine
+        return answer_service
 
     except Exception as e:
         st.error(f"❌ **Initialization Error**: {str(e)}")
@@ -117,8 +111,8 @@ def main():
     # Initialize app
     initialize_app()
 
-    # Initialize query engine (cached)
-    engine = get_query_engine()
+    # Initialize answer service (cached)
+    answer_service = get_answer_service()
 
     # Initialize session state
     initialize_session_state()
@@ -139,7 +133,7 @@ def main():
         with st.chat_message("assistant"):
             with st.spinner("🤔 Searching the archives..."):
                 try:
-                    result = engine.query(prompt)
+                    result = answer_service.answer_query(prompt)
 
                     # Remap citations and display formatted answer
                     remapped_answer, sources_text = (

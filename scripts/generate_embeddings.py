@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Script to generate embeddings and store them in Qdrant vector database."""
 
-import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -11,17 +10,21 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Add src to path
+# Add src to path for new architecture
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from src.database.connection import DatabaseManager
-from src.database.vector_operations import VectorOperations
-from src.rag.embeddings import EmbeddingGenerator
-from src.rag.vector_store import QdrantVectorStore
+from w40k.config.settings import get_settings
+from w40k.infrastructure.database.connection import DatabaseManager
+from w40k.infrastructure.database.vector_operations import VectorOperations
+from w40k.infrastructure.rag.embeddings import EmbeddingGenerator
+from w40k.infrastructure.rag.vector_store import QdrantVectorStore
 
-MODEL = os.getenv("EMBEDDING_MODEL")
-if not MODEL:
-    print("❌ EMBEDDING_MODEL environment variable is required.")
+# Initialize settings
+try:
+    settings = get_settings()
+except Exception as e:
+    print(f"❌ Configuration error: {e}")
+    print("Please check your environment variables and .env file.")
     sys.exit(1)
 
 DIMS = {
@@ -29,7 +32,7 @@ DIMS = {
     "text-embedding-3-large": 3072,
     "text-embedding-ada-002": 1536,
 }
-vector_size: int = DIMS.get(MODEL, 1536)
+vector_size: int = DIMS.get(settings.embedding_model, 1536)
 
 
 def generate_embeddings(
@@ -65,13 +68,13 @@ def generate_embeddings(
     print("🚀 Warhammer 40k Embedding Generator")
     print("=" * 50)
 
-    # Check required environment variables
-    if not os.getenv("OPENAI_API_KEY"):
-        print("❌ OPENAI_API_KEY environment variable is required.")
-        return 1
-
-    if not os.getenv("EMBEDDING_MODEL"):
-        print("❌ EMBEDDING_MODEL environment variable is required.")
+    # Initialize settings and validate configuration
+    try:
+        settings = get_settings()
+        print(f"✅ Configuration loaded (model: {settings.embedding_model})")
+    except Exception as e:
+        print(f"❌ Configuration error: {e}")
+        print("Please check your environment variables and .env file.")
         return 1
 
     # Initialize components
@@ -85,14 +88,20 @@ def generate_embeddings(
 
     # Qdrant Vector Store
     try:
-        vector_store = QdrantVectorStore(
-            collection_name=collection_name,
-            host=qdrant_host,
-            port=qdrant_port,
-            url=os.getenv("QDRANT_URL"),
-            api_key=os.getenv("QDRANT_API_KEY"),
-            vector_size=vector_size,
-        )
+        if settings.is_qdrant_cloud():
+            vector_store = QdrantVectorStore(
+                collection_name=collection_name,
+                url=settings.qdrant_url,
+                api_key=settings.qdrant_api_key,
+                vector_size=vector_size,
+            )
+        else:
+            vector_store = QdrantVectorStore(
+                collection_name=collection_name,
+                host=qdrant_host,
+                port=qdrant_port,
+                vector_size=vector_size,
+            )
 
         # Health check
         if not vector_store.health_check():
@@ -109,9 +118,13 @@ def generate_embeddings(
 
     # Embedding Generator
     try:
-        embedding_generator = EmbeddingGenerator(batch_size=batch_size)
+        embedding_generator = EmbeddingGenerator(
+            api_key=settings.openai_api_key,
+            model=settings.embedding_model,
+            batch_size=batch_size
+        )
         print(
-            f"✅ Initialized OpenAI embedding generator ({os.getenv('EMBEDDING_MODEL')})"
+            f"✅ Initialized OpenAI embedding generator ({settings.embedding_model})"
         )
 
     except Exception as e:
@@ -168,7 +181,7 @@ def generate_embeddings(
             estimated_time = (chunks_needed / batch_size) * 2  # ~2 seconds per batch
             print(f"   Estimated processing time: {estimated_time/60:.1f} minutes")
         print(f"   Batch size: {batch_size}")
-        print(f"   Embedding model: {os.getenv('EMBEDDING_MODEL')}")
+        print(f"   Embedding model: {settings.embedding_model}")
         print(f"   Force recreate: {force_recreate}")
         print(f"   Retry failed: {retry_failed}")
         return 0

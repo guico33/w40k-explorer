@@ -1,1 +1,0 @@
-"""Query engine module for Warhammer 40k RAG application."""

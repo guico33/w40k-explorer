@@ -1,4 +1,4 @@
-"""Type definitions for the query engine."""
+"""Core domain models for the W40K knowledge base."""
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 @dataclass
 class QueryResult:
-    """Structured result from query engine."""
+    """Structured result from a knowledge base query."""
 
     answer: str
     citations: List[Dict[str, str]]
@@ -17,3 +17,13 @@ class QueryResult:
     from_cache: bool = False
     query_time_ms: int = 0
     error: Optional[str] = None
+
+
+@dataclass
+class QueryRequest:
+    """Structured query request."""
+    
+    question: str
+    max_results: int = 10
+    min_score: Optional[float] = None
+    filters: Optional[Dict] = None

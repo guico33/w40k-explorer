@@ -1,5 +1,5 @@
 import json
-from typing import List, Union, Optional
+from typing import List, Union
 
 def format_section_path(section_path: Union[str, List[str], None]) -> str:
     """Format section path for display."""

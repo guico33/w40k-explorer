@@ -1,8 +1,6 @@
 """Embedding generation for Warhammer 40k wiki chunks."""
 
 from __future__ import annotations
-
-import os
 import time
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -10,15 +8,7 @@ import openai
 from openai import OpenAI
 from tqdm import tqdm
 
-try:
-    from ..database.models import Chunk
-except ImportError:
-    # Handle case when running as script
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from database.models import Chunk
+from ..database.models import Chunk
 
 
 class EmbeddingGenerator:
@@ -35,29 +25,23 @@ class EmbeddingGenerator:
         """Initialize embedding generator.
 
         Args:
-            model: OpenAI embedding model to use (uses EMBEDDING_MODEL env var if not provided)
-            api_key: OpenAI API key (uses OPENAI_API_KEY env var if not provided)
+            model: OpenAI embedding model to use (required; pass from Settings)
+            api_key: OpenAI API key (required; pass from Settings)
             batch_size: Number of chunks to process in each batch
             max_retries: Maximum number of retry attempts for failed requests
             retry_delay: Initial delay between retries (exponential backoff)
         """
-        # Get model from env var or parameter, but require it
-        model_name = model or os.getenv("EMBEDDING_MODEL")
-        if not model_name:
-            raise ValueError(
-                "Embedding model is required. Set EMBEDDING_MODEL environment variable or pass model parameter."
-            )
-        self.model = model_name
+        # Require explicit model
+        if not model:
+            raise ValueError("Embedding model is required. Pass settings.embedding_model to EmbeddingGenerator.")
+        self.model = model
         self.batch_size = batch_size
         self.max_retries = max_retries
         self.retry_delay = retry_delay
 
         # Initialize OpenAI client
-        api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise ValueError(
-                "OpenAI API key is required. Set OPENAI_API_KEY environment variable."
-            )
+            raise ValueError("OpenAI API key is required. Pass settings.openai_api_key to EmbeddingGenerator.")
 
         self.client = OpenAI(api_key=api_key, timeout=30.0)
 

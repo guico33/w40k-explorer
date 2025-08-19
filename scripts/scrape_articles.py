@@ -5,10 +5,10 @@ import asyncio
 import sys
 from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+# Add src to path for new architecture
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from src.scraper.article_scraper import ArticleScraper
+from w40k.infrastructure.scraper.article_scraper import ArticleScraper
 
 
 async def main():

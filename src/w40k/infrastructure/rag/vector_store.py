@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import html
 import json
-import os
 import re
 import uuid
 from typing import Dict, List, Optional, Union
@@ -15,15 +14,7 @@ from qdrant_client.http import models
 from qdrant_client.http.models import Distance, VectorParams
 from tqdm import tqdm
 
-try:
-    from ..database.models import Chunk
-except ImportError:
-    # Handle case when running as script
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from database.models import Chunk
+from ..database.models import Chunk
 
 
 def point_id_from_chunk_uid(chunk_uid: str) -> str:
@@ -165,13 +156,12 @@ class QdrantVectorStore:
         self.vector_size = vector_size
         self.distance = distance
 
-        # Initialize client based on deployment type
+        # Initialize client based on deployment type (explicit settings only)
         if url or api_key:
+            if not (url and api_key):
+                raise ValueError("Both url and api_key must be provided for Qdrant Cloud configuration.")
             # Qdrant Cloud
-            self.client = QdrantClient(
-                url=url or os.getenv("QDRANT_URL"),
-                api_key=api_key or os.getenv("QDRANT_API_KEY"),
-            )
+            self.client = QdrantClient(url=url, api_key=api_key)
         else:
             # Local Qdrant
             self.client = QdrantClient(host=host, port=port)

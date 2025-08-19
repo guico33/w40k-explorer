@@ -10,17 +10,8 @@ from sqlmodel import select
 from .connection import DatabaseManager
 from .models import Chunk
 
-try:
-    from ..rag.embeddings import EmbeddingGenerator
-    from ..rag.vector_store import QdrantVectorStore, create_qdrant_filters
-except ImportError:
-    # Handle case when running as script
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from rag.embeddings import EmbeddingGenerator
-    from rag.vector_store import QdrantVectorStore, create_qdrant_filters
+from ..rag.embeddings import EmbeddingGenerator
+from ..rag.vector_store import QdrantVectorStore, create_qdrant_filters
 
 
 class VectorOperations:

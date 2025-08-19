@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
 """Test script for embedding generation and Qdrant integration."""
 
-import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Add src to path
+# Add src to path for new architecture
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from src.database.connection import DatabaseManager
-from src.rag.embeddings import EmbeddingGenerator, validate_embedding_dimensions
-from src.rag.vector_store import QdrantVectorStore
+from w40k.config.settings import get_settings
+from w40k.infrastructure.database.connection import DatabaseManager
+from w40k.infrastructure.rag.embeddings import (
+    EmbeddingGenerator,
+    validate_embedding_dimensions,
+)
+from w40k.infrastructure.rag.vector_store import QdrantVectorStore
 
 
 def test_embeddings():
@@ -37,7 +41,7 @@ def test_embeddings():
     with next(db_manager.get_session()) as session:
         from sqlmodel import select
 
-        from src.database.models import Chunk
+        from w40k.infrastructure.database.models import Chunk
 
         sample_chunks = session.exec(
             select(Chunk).where(Chunk.active == True).limit(5)
@@ -54,12 +58,14 @@ def test_embeddings():
     # Test embedding generation
     print("\n🔧 Testing OpenAI embedding generation...")
 
-    if not os.getenv("OPENAI_API_KEY"):
-        print("❌ OPENAI_API_KEY environment variable not set")
-        return 1
+    settings = get_settings()
 
     try:
-        embedding_generator = EmbeddingGenerator(batch_size=5)
+        embedding_generator = EmbeddingGenerator(
+            api_key=settings.openai_api_key,
+            model=settings.embedding_model,
+            batch_size=5,
+        )
         print("✅ Initialized OpenAI client")
     except Exception as e:
         print(f"❌ Failed to initialize OpenAI client: {e}")
@@ -81,9 +87,7 @@ def test_embeddings():
 
     # Validate dimensions
     print("🔍 Validating embedding dimensions...")
-    if validate_embedding_dimensions(
-        embeddings, model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-    ):
+    if validate_embedding_dimensions(embeddings, model=settings.embedding_model):
         print("✅ Embedding dimensions match the selected model")
     else:
         print("❌ Embedding dimension validation failed")
@@ -101,11 +105,20 @@ def test_embeddings():
     print("\n🗄️  Testing Qdrant integration...")
 
     try:
-        vector_store = QdrantVectorStore(
-            collection_name="test_w40k_chunks",
-            url=os.getenv("QDRANT_URL"),
-            api_key=os.getenv("QDRANT_API_KEY")
-        )
+        if settings.is_qdrant_cloud():
+            vector_store = QdrantVectorStore(
+                collection_name="test_w40k_chunks",
+                url=settings.qdrant_url,
+                api_key=settings.qdrant_api_key,
+                vector_size=1536,
+            )
+        else:
+            vector_store = QdrantVectorStore(
+                collection_name="test_w40k_chunks",
+                host=settings.qdrant_host,
+                port=settings.qdrant_port,
+                vector_size=1536,
+            )
 
         if not vector_store.health_check():
             print("⚠️  Qdrant not available - skipping vector store tests")

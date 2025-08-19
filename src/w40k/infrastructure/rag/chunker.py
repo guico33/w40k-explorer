@@ -29,14 +29,7 @@ from typing import Iterator, List, Optional, Sequence, Tuple
 
 import tiktoken
 
-try:
-    from ..database.models import BlockType, Chunk
-except ImportError:
-    # Handle case when running as script
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from database.models import BlockType, Chunk
+from ..database.models import BlockType, Chunk
 
 
 @dataclass
@@ -170,9 +163,7 @@ def _yield_micro_from_container(
         txt = (p or "").strip()
         if not txt:
             continue
-        yield from _maybe_split_micro(
-            txt, path, BlockType.PARAGRAPH, params, tk_count
-        )
+        yield from _maybe_split_micro(txt, path, BlockType.PARAGRAPH, params, tk_count)
 
     # lists: items as individual micros
     for lst in container.get("lists", []) or []:
@@ -244,17 +235,13 @@ def _maybe_split_micro(
     for s in sentences:
         st = tk_count(s)
         if acc and acc_tokens + st > params.max_tokens_per_micro:
-            yield Micro(
-                text=" ".join(acc), section_path=path, block_type=btype
-            )
+            yield Micro(text=" ".join(acc), section_path=path, block_type=btype)
             acc, acc_tokens = [s], st
         else:
             acc.append(s)
             acc_tokens += st
     if acc:
-        yield Micro(
-            text=" ".join(acc), section_path=path, block_type=btype
-        )
+        yield Micro(text=" ".join(acc), section_path=path, block_type=btype)
 
 
 def _walk_sections(
