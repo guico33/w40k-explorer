@@ -19,7 +19,7 @@ from w40k.infrastructure.rag.embeddings import (
     EmbeddingGenerator,
     validate_embedding_dimensions,
 )
-from w40k.infrastructure.rag.vector_store import QdrantVectorStore
+from w40k.infrastructure.rag.qdrant_vector_store import QdrantVectorStore
 
 
 def test_embeddings():

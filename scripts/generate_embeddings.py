@@ -17,7 +17,7 @@ from w40k.config.settings import get_settings
 from w40k.infrastructure.database.connection import DatabaseManager
 from w40k.infrastructure.database.vector_operations import VectorOperations
 from w40k.infrastructure.rag.embeddings import EmbeddingGenerator
-from w40k.infrastructure.rag.vector_store import QdrantVectorStore
+from w40k.infrastructure.rag.qdrant_vector_store import QdrantVectorStore
 
 # Initialize settings
 try:

@@ -11,7 +11,8 @@ from .connection import DatabaseManager
 from .models import Chunk
 
 from ..rag.embeddings import EmbeddingGenerator
-from ..rag.vector_store import QdrantVectorStore, create_qdrant_filters
+from ..rag.qdrant_vector_store import QdrantVectorStore
+from ..rag.utils import create_qdrant_filters
 
 
 class VectorOperations:

@@ -6,7 +6,7 @@ from typing import Dict, Optional, Tuple
 from .settings import Settings, get_settings
 from ..infrastructure.database.connection import DatabaseManager
 from ..infrastructure.rag.embeddings import EmbeddingGenerator  
-from ..infrastructure.rag.vector_store import QdrantVectorStore
+from ..infrastructure.rag.qdrant_vector_store import QdrantVectorStore
 from ..adapters.llm.openai_client import OpenAIClient
 from ..adapters.persistence.vector_operations_adapter import VectorOperationsAdapter
 from ..usecases.answer import AnswerService

@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from ...infrastructure.rag.vector_store import QdrantVectorStore
+from ...infrastructure.rag.qdrant_vector_store import QdrantVectorStore
 
 
 class QdrantAdapter(QdrantVectorStore):

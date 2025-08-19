@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import ast
-import html
 import json
-import re
+import logging
 import uuid
 from typing import Dict, List, Optional, Union
 
@@ -15,6 +13,7 @@ from qdrant_client.http.models import Distance, VectorParams
 from tqdm import tqdm
 
 from ..database.models import Chunk
+from .utils import parse_kv_preview, parse_links_out, normalize_section_path
 
 
 def point_id_from_chunk_uid(chunk_uid: str) -> str:
@@ -30,102 +29,10 @@ def point_id_from_chunk_uid(chunk_uid: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, chunk_uid))
 
 
-def parse_links_out(links_str: Optional[str]) -> List[Dict[str, str]]:
-    """Parse links_out string into structured JSON array.
-
-    Args:
-        links_str: JSON string containing Python dict representations
-
-    Returns:
-        List of link dictionaries with text and href keys
-    """
-    if not links_str:
-        return []
-
-    try:
-        # Parse the JSON array of string representations
-        link_strings = json.loads(links_str)
-        links = []
-        for link_str in link_strings:
-            if not link_str:
-                continue
-            try:
-                # Parse each string representation of dict using ast.literal_eval
-                link_dict = ast.literal_eval(link_str)
-                if (
-                    isinstance(link_dict, dict)
-                    and "text" in link_dict
-                    and "href" in link_dict
-                ):
-                    # Only include links with actual content
-                    if link_dict["text"].strip() and link_dict["href"].strip():
-                        links.append(
-                            {
-                                "text": link_dict["text"].strip(),
-                                "href": link_dict["href"].strip(),
-                            }
-                        )
-            except (ValueError, SyntaxError):
-                # Skip malformed individual link entries
-                continue
-        return links
-    except (json.JSONDecodeError, TypeError):
-        # Return empty list for completely malformed data
-        return []
+# Note: parse_links_out and parse_kv_preview are imported from .utils
 
 
-KV = Dict[str, Union[str, List[str]]]
-
-_PAIR_RE = re.compile(
-    r"""
-    \s*                          # leading space
-    (?P<key>[^=;]+?)             # key = anything up to '=' or ';'
-    \s*=\s*
-    (?P<val>[^;]*)               # value = anything up to next ';' (greedy)
-    \s*(?:;|$)                   # ends with ';' or EOS
-""",
-    re.VERBOSE,
-)
-
-
-def parse_kv_preview(kv_str: Optional[str]) -> KV:
-    """
-    Parse a 'key=value; key2=value2' string to a dict.
-    - Trims whitespace
-    - Unescapes HTML entities
-    - Strips surrounding quotes in values
-    - Handles trailing semicolons and duplicate keys (collates to list)
-    """
-    if not kv_str:
-        return {}
-
-    out: KV = {}
-
-    for m in _PAIR_RE.finditer(kv_str):
-        raw_key = m.group("key").strip()
-        raw_val = m.group("val").strip()
-
-        if not raw_key:
-            continue
-
-        # Unescape HTML entities and strip surrounding quotes
-        key = html.unescape(raw_key).strip().strip("\"'“”‘’")
-        val = html.unescape(raw_val).strip().strip("\"'“”‘’")
-
-        if not val:
-            continue
-
-        # Collate duplicates into a list
-        if key in out:
-            existing_value = out[key]
-            if isinstance(existing_value, list):
-                existing_value.append(val)
-            else:
-                out[key] = [existing_value, val]
-        else:
-            out[key] = val
-
-    return out
+logger = logging.getLogger(__name__)
 
 
 class QdrantVectorStore:
@@ -159,7 +66,9 @@ class QdrantVectorStore:
         # Initialize client based on deployment type (explicit settings only)
         if url or api_key:
             if not (url and api_key):
-                raise ValueError("Both url and api_key must be provided for Qdrant Cloud configuration.")
+                raise ValueError(
+                    "Both url and api_key must be provided for Qdrant Cloud configuration."
+                )
             # Qdrant Cloud
             self.client = QdrantClient(url=url, api_key=api_key)
         else:
@@ -181,12 +90,12 @@ class QdrantVectorStore:
             collection_exists = any(c.name == self.collection_name for c in collections)
 
             if collection_exists and recreate:
-                print(f"🗑️  Deleting existing collection: {self.collection_name}")
+                logger.info(f"Deleting existing collection: {self.collection_name}")
                 self.client.delete_collection(self.collection_name)
                 collection_exists = False
 
             if not collection_exists:
-                print(f"🏗️  Creating collection: {self.collection_name}")
+                logger.info(f"Creating collection: {self.collection_name}")
                 self.client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=VectorParams(
@@ -196,16 +105,16 @@ class QdrantVectorStore:
 
                 # Create indexes for efficient filtering
                 self._create_indexes()
-                print(
-                    f"✅ Collection created with {self.vector_size}D vectors using {self.distance} distance"
+                logger.info(
+                    f"Collection created with {self.vector_size}D using {self.distance}"
                 )
             else:
-                print(f"📁 Collection already exists: {self.collection_name}")
+                logger.info(f"Collection already exists: {self.collection_name}")
 
             return True
 
         except Exception as e:
-            print(f"❌ Failed to create collection: {e}")
+            logger.error(f"Failed to create collection: {e}")
             return False
 
     def _create_indexes(self) -> None:
@@ -231,18 +140,22 @@ class QdrantVectorStore:
                 )
             except Exception as e:
                 # Index might already exist, continue
-                print(f"⚠️  Index creation warning for {field_name}: {e}")
+                logger.warning(f"Index creation warning for {field_name}: {e}")
 
     def upsert_chunks(
         self,
         chunks_with_embeddings: List[tuple[Chunk, List[float]]],
         batch_size: int = 100,
+        show_progress: bool = False,
+        ensure_collection: bool = False,
     ) -> tuple[int, List[str]]:
         """Upsert chunks with their embeddings to Qdrant.
 
         Args:
             chunks_with_embeddings: List of (chunk, embedding) tuples
             batch_size: Number of points to upsert per batch
+            show_progress: If True, display a tqdm progress bar
+            ensure_collection: If True, ensure the collection exists before upsert
 
         Returns:
             Tuple of (number of points successfully upserted, list of successfully upserted point IDs)
@@ -250,23 +163,29 @@ class QdrantVectorStore:
         if not chunks_with_embeddings:
             return 0, []
 
+        if ensure_collection:
+            self.create_collection(recreate=False)
+
         total_upserted = 0
-        successful_point_ids = []
+        successful_chunk_uids: List[str] = []
         batch_count = (len(chunks_with_embeddings) + batch_size - 1) // batch_size
 
-        # Process in batches with progress bar
-        with tqdm(
+        # Process in batches with optional progress bar
+        pbar = tqdm(
             total=len(chunks_with_embeddings),
             desc="Uploading to Qdrant",
             unit="chunks",
             bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
-        ) as pbar:
+        ) if show_progress else None
+
+        try:
             for i in range(0, len(chunks_with_embeddings), batch_size):
                 batch = chunks_with_embeddings[i : i + batch_size]
                 points = []
 
                 batch_num = i // batch_size + 1
-                pbar.set_description(f"Batch {batch_num}/{batch_count}")
+                if pbar:
+                    pbar.set_description(f"Batch {batch_num}/{batch_count}")
 
                 # Validate dimension once per batch before processing
                 expected = self.vector_size
@@ -278,7 +197,8 @@ class QdrantVectorStore:
 
                 for chunk, embedding in batch:
                     if not embedding:
-                        pbar.update(1)  # Count skipped chunks
+                        if pbar:
+                            pbar.update(1)  # Count skipped chunks
                         continue  # Skip chunks without embeddings
 
                     # Build payload from chunk metadata with structured data
@@ -287,11 +207,7 @@ class QdrantVectorStore:
                         "article_id": chunk.article_id,
                         "article_title": chunk.article_title,
                         "canonical_url": chunk.canonical_url,
-                        "section_path": (
-                            json.loads(chunk.section_path)
-                            if isinstance(chunk.section_path, str)
-                            else chunk.section_path
-                        ),
+                        "section_path": normalize_section_path(chunk.section_path),
                         "block_type": getattr(
                             chunk.block_type,
                             "value",
@@ -338,22 +254,23 @@ class QdrantVectorStore:
                         self.client.upsert(
                             collection_name=self.collection_name, points=points
                         )
-                        # Collect successful point IDs (convert back to chunk UIDs for tracking)
+                        # Collect successful chunk UIDs from payloads
                         batch_chunk_uids = [
                             point.payload["chunk_uid"] for point in points
                         ]
-                        successful_point_ids.extend(batch_chunk_uids)
+                        successful_chunk_uids.extend(batch_chunk_uids)
                         total_upserted += len(points)
-                        pbar.update(
-                            len(points)
-                        )  # Update for successfully uploaded points
+                        if pbar:
+                            pbar.update(len(points))
                     except Exception as e:
-                        print(f"❌ Failed to upsert batch {batch_num}: {e}")
-                        pbar.update(
-                            len(batch)
-                        )  # Update progress even for failed batches
+                        logger.error(f"Failed to upsert batch {batch_num}: {e}")
+                        if pbar:
+                            pbar.update(len(batch))
+        finally:
+            if pbar:
+                pbar.close()
 
-        return total_upserted, successful_point_ids
+        return total_upserted, successful_chunk_uids
 
     def search(
         self,
@@ -387,7 +304,7 @@ class QdrantVectorStore:
             )
             return search_result
         except Exception as e:
-            print(f"❌ Search failed: {e}")
+            logger.error(f"Search failed: {e}")
             return []
 
     def get_collection_info(self) -> Dict:
@@ -423,7 +340,7 @@ class QdrantVectorStore:
                 "indexed_vectors_count": info.indexed_vectors_count or 0,
             }
         except Exception as e:
-            print(f"❌ Failed to get collection info: {e}")
+            logger.error(f"Failed to get collection info: {e}")
             return {}
 
     def delete_points(self, point_ids: List[str]) -> bool:
@@ -442,10 +359,10 @@ class QdrantVectorStore:
                 collection_name=self.collection_name,
                 points_selector=models.PointIdsList(points=extended_point_ids),
             )
-            print(f"🗑️  Deleted {len(point_ids)} points")
+            logger.info(f"Deleted {len(point_ids)} points from {self.collection_name}")
             return True
         except Exception as e:
-            print(f"❌ Failed to delete points: {e}")
+            logger.error(f"Failed to delete points: {e}")
             return False
 
     def count_points(self, filter_conditions: Optional[Dict] = None) -> int:
@@ -466,7 +383,7 @@ class QdrantVectorStore:
             )
             return result.count
         except Exception as e:
-            print(f"❌ Failed to count points: {e}")
+            logger.error(f"Failed to count points: {e}")
             return 0
 
     def health_check(self) -> bool:
@@ -480,51 +397,5 @@ class QdrantVectorStore:
             self.client.get_collections()
             return True
         except Exception as e:
-            print(f"❌ Qdrant health check failed: {e}")
+            logger.error(f"Qdrant health check failed: {e}")
             return False
-
-
-def create_qdrant_filters(
-    article_ids: Optional[List[int]] = None,
-    block_types: Optional[List[str]] = None,
-    lead_only: Optional[bool] = None,
-    min_tokens: Optional[int] = None,
-    max_tokens: Optional[int] = None,
-    active_only: bool = True,
-) -> Dict:
-    """Helper function to create Qdrant filter conditions.
-
-    Args:
-        article_ids: Filter by specific article IDs
-        block_types: Filter by block types
-        lead_only: Filter for lead paragraphs only
-        min_tokens: Minimum token count
-        max_tokens: Maximum token count
-        active_only: Filter for active chunks only
-
-    Returns:
-        Qdrant filter dictionary
-    """
-    conditions = []
-
-    if article_ids:
-        conditions.append({"key": "article_id", "match": {"any": article_ids}})
-
-    if block_types:
-        conditions.append({"key": "block_type", "match": {"any": block_types}})
-
-    if lead_only is not None:
-        conditions.append({"key": "lead", "match": {"value": lead_only}})
-
-    if min_tokens is not None:
-        conditions.append({"key": "token_count", "range": {"gte": min_tokens}})
-
-    if max_tokens is not None:
-        conditions.append({"key": "token_count", "range": {"lte": max_tokens}})
-
-    if active_only:
-        conditions.append({"key": "active", "match": {"value": True}})
-
-    if conditions:
-        return {"must": conditions}
-    return {}
