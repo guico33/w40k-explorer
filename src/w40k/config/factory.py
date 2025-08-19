@@ -174,7 +174,9 @@ def validate_environment() -> Tuple[bool, Optional[str]]:
         settings = get_settings()
         settings.validate_llm_provider()
         # Ensure embeddings configuration (OpenAI) is present since embeddings always use OpenAI
-        if not settings.openai_api_key:
+        # Use os.getenv here to avoid implicit .env loading during validation in tests
+        import os as _os
+        if not _os.getenv("OPENAI_API_KEY"):
             raise ValueError(
                 "OPENAI_API_KEY is required for embeddings even if Anthropic is the LLM provider"
             )

@@ -71,7 +71,7 @@ cd w40k-explorer
 
 2. Install dependencies:
 ```bash
-uv sync 
+run uv sync --all-extras
 ```
 
 3. Create `.env` file:
@@ -135,7 +135,7 @@ The application follows **hexagonal architecture** (ports and adapters pattern) 
 - **LLM Providers**: Pluggable OpenAI/Anthropic clients via adapter pattern
 - **Vector Store**: Qdrant for semantic similarity search
 - **Query Engine**: RAG pipeline with retrieval, diversification, and generation
-- **Database**: SQLite for article storage and metadata
+- **Database**: SQLite for storage of raw html articles and parsed content
 
 ## Project Structure
 
@@ -160,3 +160,46 @@ src/w40k/
 
 scripts/                # Utility scripts for data processing
 ```
+
+## Testing
+
+The test suite currently focuses on the inference path.
+
+- Philosophy: deterministic, no network, tests behavior (no implementation details).
+- What’s covered:
+  - AnswerService: JSON parsing, citation construction, truncation retry, threshold relaxation, refusal handling, confidence clamping, MMR de‑dup.
+  - Adapters (contracts): OpenAI and Anthropic return “Responses‑like” objects `status/output/message/output_text` that the use case parses.
+  - Streamlit utils: citation remapping `[ID]` → sequential `[1]`, ordered sources.
+  - Config/Factory: provider selection and embedding preconditions validated.
+
+### Run tests
+
+```bash
+# Full test suite (fast)
+uv run pytest -q
+
+# Only inference use cases
+uv run pytest -q tests/usecases
+
+# Adapter contract tests
+uv run pytest -q tests/adapters
+
+# With coverage
+uv run pytest --cov=w40k --cov-report=html
+```
+
+### Test layout
+
+```
+tests/
+├── adapters/                 # Contract tests for LLM adapters
+├── config/                   # Factory/config validation tests
+├── fakes/                    # Deterministic doubles (LLM, VectorOps)
+├── presentation/             # Streamlit utils tests
+└── usecases/                 # AnswerService behavior
+```
+
+Notes:
+- No API keys or external services are required — fakes are used throughout.
+- `tests/conftest.py` adds `src/` to `PYTHONPATH` for clean imports.
+- `pytest.ini` sets sensible defaults (strict markers, short tracebacks).
