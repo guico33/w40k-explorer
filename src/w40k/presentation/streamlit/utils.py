@@ -34,13 +34,16 @@ def create_url_with_fragment(url: str, section: str) -> str:
 def extract_citation_order_from_text(answer: str) -> List[int]:
     """Extract citation numbers from answer text in order of appearance.
 
+    Supports both `[id:NUMBER]` and `[NUMBER]` formats.
+
     Args:
-        answer: Answer text containing citations like [1], [2], etc.
+        answer: Answer text containing citations like [5] or [id:5]
 
     Returns:
         List of unique citation IDs in order of first appearance
     """
-    citation_pattern = r"\[(\d+)\]"
+    # Match either [id:5] or [5]
+    citation_pattern = r"\[(?:id:)?(\d+)\]"
     citation_matches = re.findall(citation_pattern, answer)
 
     # Get unique citation IDs in order of first appearance
@@ -58,19 +61,16 @@ def extract_citation_order_from_text(answer: str) -> List[int]:
 def remap_citations_in_text(answer: str, id_mapping: Dict[int, int]) -> str:
     """Remap citation numbers in answer text using provided mapping.
 
-    Args:
-        answer: Answer text with citations
-        id_mapping: Mapping from original ID to new ID
-
-    Returns:
-        Answer text with remapped citation numbers
+    Accepts both `[id:NUMBER]` and `[NUMBER]` in the original text and outputs
+    normalized `[NUMBER]` with sequential IDs.
     """
-    remapped_answer = answer
+    remapped = answer
     for original_id, sequential_id in id_mapping.items():
-        remapped_answer = remapped_answer.replace(
-            f"[{original_id}]", f"[{sequential_id}]"
-        )
-    return remapped_answer
+        # Replace tagged form first to avoid double-touching
+        remapped = remapped.replace(f"[id:{original_id}]", f"[{sequential_id}]")
+        # Replace bare form
+        remapped = remapped.replace(f"[{original_id}]", f"[{sequential_id}]")
+    return remapped
 
 
 def format_single_source(citation: Dict, sequential_id: int) -> str:
@@ -124,37 +124,21 @@ def format_sources_with_sequential_numbering(
     if not citations:
         return answer, "No sources available"
 
-    # Create lookup from citation ID to citation object
-    citations_by_id = {
-        citation.get("id"): citation
-        for citation in citations
-        if citation.get("id") is not None
-    }
+    # Prefer the order provided by citations list (already reflects citations_used)
+    # Build mapping: original context id -> sequential display id
+    original_to_seq: Dict[int, int] = {}
+    formatted_sources: List[str] = []
 
-    # Find citation order in text
-    ordered_citation_ids = extract_citation_order_from_text(answer)
+    for idx, citation in enumerate(citations, start=1):
+        cid = citation.get("id")
+        if cid is None:
+            # Skip items without an id
+            continue
+        original_to_seq[int(cid)] = idx
+        formatted_sources.append(format_single_source(citation, idx))
 
-    # Filter to only citations that actually exist
-    valid_citation_ids = [cid for cid in ordered_citation_ids if cid in citations_by_id]
-
-    if not valid_citation_ids:
-        return answer, "No valid citations found"
-
-    # Create mapping from original IDs to sequential numbers (1, 2, 3, etc.)
-    original_to_sequential = {
-        original_id: i + 1 for i, original_id in enumerate(valid_citation_ids)
-    }
-
-    # Remap citation numbers in answer text
-    remapped_answer = remap_citations_in_text(answer, original_to_sequential)
-
-    # Format sources in order they appear in text
-    formatted_sources = []
-    for i, original_id in enumerate(valid_citation_ids):
-        citation = citations_by_id[original_id]
-        sequential_id = i + 1
-        formatted_source = format_single_source(citation, sequential_id)
-        formatted_sources.append(formatted_source)
+    # Remap in-text citations to sequential [1], [2], ...
+    remapped_answer = remap_citations_in_text(answer, original_to_seq)
 
     # Join sources with separator
     sources_text = separator.join(formatted_sources)

@@ -334,14 +334,15 @@ Return ONLY a JSON array of up to {n} short query strings.
         system_prompt = """You are a pan-galactic archivist in M41, compiling a neutral chronicle from Imperial, xenos, and heretical sources under containment.
 
 STRICT RULES:
-1. Answer ONLY from the provided context passages
-2. EVERY factual claim must cite its source using [id] notation
-3. If information is not in context, explicitly say so
-4. Be precise with names, dates, and factions
-5. Use in-universe tone
-6. If context has kv_facts, prioritize those for entity attributes
+1. Answer ONLY from the provided context passages.
+2. Cite sources with bracketed numeric IDs at the END of EACH sentence, using the context item id: [ID]. Example: "Horus was named Warmaster." [3]
+   - Do NOT use any other format (no [id:3], (3), superscripts, or prose citations).
+3. If information is not in context, explicitly say so.
+4. Be precise with names, dates, and factions.
+5. Use in‑universe tone when appropriate.
+6. If context has kv_facts, prioritize those for entity attributes.
 7. Keep the answer to AT MOST 10 sentences total.
-8. Each sentence must end with a [id] citation and the whole answer must fit under ~3000 characters."""
+8. The entire answer must fit under ~3000 characters."""
 
         # Format context for prompt
         context_str = json.dumps(context_items, ensure_ascii=False, indent=2)
@@ -371,7 +372,7 @@ Provide your response following the required JSON structure."""
                             "properties": {
                                 "answer": {
                                     "type": "string",
-                                    "description": "≤10 sentences, each with [id] citation; concise.",
+                                    "description": "≤10 sentences, each ending with [ID] matching context id; concise.",
                                     "maxLength": 3000,
                                 },
                                 "citations_used": {
@@ -636,13 +637,14 @@ Provide your response following the required JSON structure."""
         """Last resort: retry with compressed constraints for extremely verbose queries."""
         logger.info(f"Attempting compression retry for query: {question[:50]}...")
         # Use stricter limits for compression retry
-        compressed_prompt = """You are a Warhammer 40K lore expert answering from a curated archive.
+        compressed_prompt = """You are a pan-galactic archivist in M41, compiling a neutral chronicle from Imperial, xenos, and heretical sources under containment.
 
 STRICT RULES:
-1. Answer ONLY from the provided context passages
-2. EVERY factual claim must cite its source using [id] notation
-3. Keep the answer to EXACTLY 3 sentences or fewer
-4. Be extremely concise and direct"""
+1. Answer ONLY from the provided context passages.
+2. Cite sources with bracketed numeric IDs at the END of EACH sentence, using the context item id: [ID]. Example: "Horus was named Warmaster." [3]
+   - Do NOT use any other format (no [id:3], (3), superscripts).
+3. Keep the answer to EXACTLY 3 sentences or fewer.
+4. Be extremely concise and direct."""
 
         context_str = json.dumps(context_items, ensure_ascii=False, indent=2)
         user_prompt = f"""Question: {question}

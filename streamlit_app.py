@@ -91,6 +91,8 @@ def display_message(role: str, content: str, result: Optional[QueryResult] = Non
 
             # Display sources
             st.markdown("**📚 Sources:**")
+            if not result.citations and not getattr(result, "citations_used", []):
+                st.info("Sources unavailable: structured output missing or invalid JSON.")
             st.markdown(sources_text)
 
             # Display metadata
@@ -148,6 +150,8 @@ def main():
 
                     # Display sources
                     st.markdown("**📚 Sources:**")
+                    if not result.citations and not getattr(result, "citations_used", []):
+                        st.info("Sources unavailable: structured output missing or invalid JSON.")
                     st.markdown(sources_text)
 
                     # Display metadata
