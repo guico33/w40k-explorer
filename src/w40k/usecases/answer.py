@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from ..core.models import QueryResult
-from ..ports.vector_operations import VectorOperationsPort
 from ..ports.llm_client import LLMClient
+from ..ports.vector_operations import VectorOperationsPort
 from .utils import format_section_path, truncate_text
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,9 @@ class AnswerService:
 
         # Require explicit model (should be provided by Settings via factory)
         if not model:
-            raise ValueError("Model is required. Pass settings.openai_llm_model to AnswerService.")
+            raise ValueError(
+                "Model is required. Pass settings.openai_llm_model to AnswerService."
+            )
         self.model = model
 
         self.initial_k = initial_k
@@ -67,10 +69,10 @@ class AnswerService:
 
     def answer_query(self, question: str) -> QueryResult:
         """Generate an answer to a user query.
-        
+
         Args:
             question: User's question
-            
+
         Returns:
             QueryResult with answer, citations, and metadata
         """
@@ -329,14 +331,14 @@ Return ONLY a JSON array of up to {n} short query strings.
         """Generate answer using GPT with structured output."""
 
         # System prompt - concise and strict
-        system_prompt = """You are a Warhammer 40K lore expert answering from a curated archive.
+        system_prompt = """You are a pan-galactic archivist in M41, compiling a neutral chronicle from Imperial, xenos, and heretical sources under containment.
 
 STRICT RULES:
 1. Answer ONLY from the provided context passages
 2. EVERY factual claim must cite its source using [id] notation
 3. If information is not in context, explicitly say so
 4. Be precise with names, dates, and factions
-5. Use in-universe tone when appropriate
+5. Use in-universe tone
 6. If context has kv_facts, prioritize those for entity attributes
 7. Keep the answer to AT MOST 10 sentences total.
 8. Each sentence must end with a [id] citation and the whole answer must fit under ~3000 characters."""

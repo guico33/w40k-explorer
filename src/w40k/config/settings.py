@@ -10,13 +10,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Configuration settings loaded from environment variables."""
 
+    # LLM Provider Configuration
+    llm_provider: str = Field(
+        default="openai",
+        description="LLM provider to use: 'openai' or 'anthropic'",
+        validation_alias="LLM_PROVIDER",
+    )
+
     # OpenAI Configuration
-    openai_api_key: str = Field(
+    openai_api_key: Optional[str] = Field(
+        default=None,
         description="OpenAI API key for LLM and embeddings",
         validation_alias="OPENAI_API_KEY",
     )
     openai_llm_model: str = Field(
-        default="gpt-4",
+        default="gpt-4o-mini-2024-07-18",
         description="OpenAI model for text generation",
         validation_alias="OPENAI_LLM_MODEL",
     )
@@ -24,6 +32,18 @@ class Settings(BaseSettings):
         default="text-embedding-3-small",
         description="OpenAI embedding model",
         validation_alias="EMBEDDING_MODEL",
+    )
+
+    # Anthropic Configuration
+    anthropic_api_key: Optional[str] = Field(
+        default=None,
+        description="Anthropic API key for LLM",
+        validation_alias="ANTHROPIC_API_KEY",
+    )
+    anthropic_llm_model: str = Field(
+        default="claude-3-7-sonnet-latest",
+        description="Anthropic model for text generation",
+        validation_alias="ANTHROPIC_LLM_MODEL",
     )
 
     # Qdrant Configuration
@@ -88,6 +108,9 @@ class Settings(BaseSettings):
     openai_timeout: float = Field(
         default=30.0, description="OpenAI API request timeout in seconds"
     )
+    anthropic_timeout: float = Field(
+        default=30.0, description="Anthropic API request timeout in seconds"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -107,6 +130,45 @@ class Settings(BaseSettings):
     def db_exists(self) -> bool:
         """Check if the SQLite database file exists."""
         return self.get_db_path().exists()
+
+    def is_anthropic_enabled(self) -> bool:
+        """Check if Anthropic provider is enabled and configured."""
+        return self.llm_provider == "anthropic" and bool(self.anthropic_api_key)
+
+    def is_openai_enabled(self) -> bool:
+        """Check if OpenAI provider is enabled and configured."""
+        return self.llm_provider == "openai" and bool(self.openai_api_key)
+
+    def validate_llm_provider(self) -> None:
+        """Validate that the selected LLM provider has required configuration."""
+        if self.llm_provider == "openai" and not self.openai_api_key:
+            raise ValueError("OpenAI API key is required when llm_provider is 'openai'")
+        elif self.llm_provider == "anthropic" and not self.anthropic_api_key:
+            raise ValueError(
+                "Anthropic API key is required when llm_provider is 'anthropic'"
+            )
+        elif self.llm_provider not in ["openai", "anthropic"]:
+            raise ValueError(
+                f"Unsupported llm_provider: {self.llm_provider}. Must be 'openai' or 'anthropic'"
+            )
+
+    def get_llm_model(self) -> str:
+        """Get the appropriate LLM model for the current provider."""
+        if self.llm_provider == "openai":
+            return self.openai_llm_model
+        elif self.llm_provider == "anthropic":
+            return self.anthropic_llm_model
+        else:
+            raise ValueError(f"Unsupported llm_provider: {self.llm_provider}")
+
+    def get_llm_timeout(self) -> float:
+        """Get the appropriate timeout for the current provider."""
+        if self.llm_provider == "openai":
+            return self.openai_timeout
+        elif self.llm_provider == "anthropic":
+            return self.anthropic_timeout
+        else:
+            raise ValueError(f"Unsupported llm_provider: {self.llm_provider}")
 
 
 def get_settings() -> Settings:

@@ -8,8 +8,39 @@ from ..infrastructure.database.connection import DatabaseManager
 from ..infrastructure.rag.embeddings import EmbeddingGenerator  
 from ..infrastructure.rag.qdrant_vector_store import QdrantVectorStore
 from ..adapters.llm.openai_client import OpenAIClient
+from ..adapters.llm.anthropic_client import AnthropicClient
 from ..adapters.persistence.vector_operations_adapter import VectorOperationsAdapter
 from ..usecases.answer import AnswerService
+from ..ports.llm_client import LLMClient
+
+
+def create_llm_client(settings: Settings) -> LLMClient:
+    """Create and configure the appropriate LLM client based on settings.
+    
+    Args:
+        settings: Settings instance with LLM provider configuration
+        
+    Returns:
+        Configured LLM client instance
+        
+    Raises:
+        ValueError: If provider configuration is invalid
+    """
+    # Validate provider configuration
+    settings.validate_llm_provider()
+    
+    if settings.llm_provider == "openai":
+        return OpenAIClient(
+            api_key=settings.openai_api_key,
+            timeout=settings.get_llm_timeout(),
+        )
+    elif settings.llm_provider == "anthropic":
+        return AnthropicClient(
+            api_key=settings.anthropic_api_key,
+            timeout=settings.get_llm_timeout(),
+        )
+    else:
+        raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
 
 def create_answer_service(
@@ -73,7 +104,12 @@ def create_answer_service(
         )
         connection_info = f"Local Qdrant: {settings.qdrant_host}:{settings.qdrant_port}"
     
-    # Initialize embedding generator
+    # Initialize embedding generator (always uses OpenAI for embeddings)
+    # Note: Even when using Anthropic for LLM, we still use OpenAI for embeddings
+    # as Anthropic doesn't provide embedding models
+    if not settings.openai_api_key:
+        raise ValueError("OpenAI API key is required for embeddings, even when using Anthropic for LLM")
+    
     embedding_gen = EmbeddingGenerator(
         api_key=settings.openai_api_key,
         model=settings.embedding_model,
@@ -85,17 +121,14 @@ def create_answer_service(
     # Initialize vector operations using the adapter
     vector_ops = VectorOperationsAdapter(db_manager, vector_store, embedding_gen)
     
-    # Initialize OpenAI LLM client
-    llm_client = OpenAIClient(
-        api_key=settings.openai_api_key,
-        timeout=settings.openai_timeout
-    )
+    # Initialize LLM client based on provider
+    llm_client = create_llm_client(settings)
     
     # Create answer service
     answer_service = AnswerService(
         vector_operations=vector_ops,
         llm_client=llm_client,
-        model=settings.openai_llm_model,
+        model=settings.get_llm_model(),
         initial_k=initial_k,
         max_context_chunks=max_context,
         min_similarity_score=min_score,
@@ -112,7 +145,8 @@ def create_answer_service(
         stats = {
             "chunks_count": embedding_stats.get("embeddings_in_qdrant", "unknown"),
             "coverage_percentage": embedding_stats.get("coverage_percentage", 0),
-            "model": settings.openai_llm_model,
+            "provider": settings.llm_provider,
+            "model": settings.get_llm_model(),
             "connection_info": connection_info,
             "db_path": db_path if will_use_sqlite else "N/A (Qdrant-only mode)",
         }
@@ -120,7 +154,8 @@ def create_answer_service(
         stats = {
             "chunks_count": "unknown",
             "coverage_percentage": 0,
-            "model": settings.openai_llm_model,
+            "provider": settings.llm_provider,
+            "model": settings.get_llm_model(),
             "connection_info": connection_info,
             "db_path": db_path if will_use_sqlite else "N/A (Qdrant-only mode)",
             "error": str(e),
@@ -136,7 +171,13 @@ def validate_environment() -> Tuple[bool, Optional[str]]:
         Tuple of (is_valid, error_message)
     """
     try:
-        get_settings()
+        settings = get_settings()
+        settings.validate_llm_provider()
+        # Ensure embeddings configuration (OpenAI) is present since embeddings always use OpenAI
+        if not settings.openai_api_key:
+            raise ValueError(
+                "OPENAI_API_KEY is required for embeddings even if Anthropic is the LLM provider"
+            )
         return True, None
     except Exception as e:
         return False, str(e)
