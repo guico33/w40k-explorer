@@ -110,7 +110,7 @@ QDRANT_API_KEY=your_qdrant_api_key
 
 **Streamlit Chat Interface:**
 ```bash
-uv run streamlit run streamlit_app.py
+uv run streamlit run src/w40k/presentation/streamlit/app.py
 ```
 
 **Command Line Interface:**
