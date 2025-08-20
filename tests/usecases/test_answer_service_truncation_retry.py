@@ -1,10 +1,10 @@
 from w40k.usecases.answer import AnswerService
-from tests.fakes.fake_vector_ops import FakeVectorOperations
+from tests.fakes.fake_vector_service import FakeVectorService
 from tests.fakes.fake_llm import FakeLLMClient
 
 
 def test_answer_service_truncation_triggers_compression_retry_and_succeeds():
-    vec_ops = FakeVectorOperations()
+    vec_ops = FakeVectorService()
     llm = FakeLLMClient(mode="incomplete")
 
     svc = AnswerService(
@@ -21,4 +21,3 @@ def test_answer_service_truncation_triggers_compression_retry_and_succeeds():
 
     assert result.answer.startswith("Compressed:"), "Expected compressed retry answer"
     assert result.citations, "Citations should be present after retry"
-

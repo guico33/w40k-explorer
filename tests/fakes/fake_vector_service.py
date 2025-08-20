@@ -1,9 +1,9 @@
 from typing import Dict, List, Optional
 
-from w40k.ports.vector_operations import VectorOperationsPort
+from w40k.ports.vector_service import VectorServicePort
 
 
-class FakeVectorOperations(VectorOperationsPort):
+class FakeVectorService(VectorServicePort):
     """Deterministic VectorOperations fake for tests (no DB, no network)."""
 
     def __init__(self, hits: Optional[List[Dict]] = None):
@@ -53,3 +53,44 @@ class FakeVectorOperations(VectorOperationsPort):
             "embeddings_in_qdrant": 2,
             "coverage_percentage": 100.0,
         }
+
+    def get_collection_info(self) -> Dict:
+        # Minimal collection info for stats
+        return {
+            "name": "test_collection",
+            "points_count": len(self._hits),
+            "vector_size": 1536,
+            "distance": "cosine",
+            "segments_count": 1,
+            "status": "green",
+            "indexed_vectors_count": len(self._hits),
+        }
+
+    # New no-op/indexing methods to satisfy the expanded port
+    def create_collection(self, recreate: bool = False) -> bool:
+        return True
+
+    def upsert_chunks(self, chunks_with_embeddings, batch_size: int = 100, show_progress: bool = False, ensure_collection: bool = False):  # type: ignore[override]
+        # Accept any input and pretend all were upserted successfully
+        try:
+            count = len(chunks_with_embeddings)
+        except Exception:
+            count = 0
+        # Return (count, list_of_chunk_uids) per contract
+        uids = []
+        for pair in (chunks_with_embeddings or []):
+            try:
+                chunk, _ = pair
+                uids.append(getattr(chunk, "chunk_uid", None) or "")
+            except Exception:
+                continue
+        return count, uids
+
+    def delete_points(self, point_ids: List[str]) -> bool:
+        return True
+
+    def delete_collection(self) -> bool:
+        return True
+
+    def health_check(self) -> bool:
+        return True

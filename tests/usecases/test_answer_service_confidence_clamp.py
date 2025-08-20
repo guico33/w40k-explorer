@@ -1,10 +1,10 @@
 from w40k.usecases.answer import AnswerService
-from tests.fakes.fake_vector_ops import FakeVectorOperations
+from tests.fakes.fake_vector_service import FakeVectorService
 from tests.fakes.fake_llm import FakeLLMClient
 
 
 def test_confidence_is_clamped_between_0_and_1():
-    vec_ops = FakeVectorOperations()
+    vec_ops = FakeVectorService()
     llm = FakeLLMClient(mode="bad_conf")
 
     svc = AnswerService(
@@ -20,4 +20,3 @@ def test_confidence_is_clamped_between_0_and_1():
     result = svc.answer_query("Who is Horus?")
 
     assert 0.0 <= result.confidence <= 1.0
-

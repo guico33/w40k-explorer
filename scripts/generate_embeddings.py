@@ -17,7 +17,7 @@ from w40k.config.settings import get_settings
 from w40k.infrastructure.database.connection import DatabaseManager
 from w40k.infrastructure.database.vector_operations import VectorOperations
 from w40k.infrastructure.rag.embeddings import EmbeddingGenerator
-from w40k.infrastructure.rag.qdrant_vector_store import QdrantVectorStore
+from w40k.adapters.vector_services.qdrant_service import QdrantVectorService
 
 # Initialize settings
 try:
@@ -86,36 +86,6 @@ def generate_embeddings(
         print(f"❌ Database not found: {db_path}")
         return 1
 
-    # Qdrant Vector Store
-    try:
-        if settings.is_qdrant_cloud():
-            vector_store = QdrantVectorStore(
-                collection_name=collection_name,
-                url=settings.qdrant_url,
-                api_key=settings.qdrant_api_key,
-                vector_size=vector_size,
-            )
-        else:
-            vector_store = QdrantVectorStore(
-                collection_name=collection_name,
-                host=qdrant_host,
-                port=qdrant_port,
-                vector_size=vector_size,
-            )
-
-        # Health check
-        if not vector_store.health_check():
-            print(
-                "❌ Qdrant is not accessible. Please start Qdrant server or check connection."
-            )
-            return 1
-
-        print("✅ Connected to Qdrant")
-
-    except Exception as e:
-        print(f"❌ Failed to connect to Qdrant: {e}")
-        return 1
-
     # Embedding Generator
     try:
         embedding_generator = EmbeddingGenerator(
@@ -131,8 +101,40 @@ def generate_embeddings(
         print(f"❌ Failed to initialize OpenAI client: {e}")
         return 1
 
+    # Qdrant Vector Service
+    try:
+        if settings.is_qdrant_cloud():
+            vector_service = QdrantVectorService(
+                embedding_generator,
+                collection_name=collection_name,
+                url=settings.qdrant_url,
+                api_key=settings.qdrant_api_key,
+                vector_size=vector_size,
+            )
+        else:
+            vector_service = QdrantVectorService(
+                embedding_generator,
+                collection_name=collection_name,
+                host=qdrant_host,
+                port=qdrant_port,
+                vector_size=vector_size,
+            )
+
+        # Health check
+        if not vector_service.health_check():
+            print(
+                "❌ Qdrant is not accessible. Please start Qdrant server or check connection."
+            )
+            return 1
+
+        print("✅ Connected to Qdrant")
+
+    except Exception as e:
+        print(f"❌ Failed to connect to Qdrant: {e}")
+        return 1
+
     # Vector Operations
-    vector_ops = VectorOperations(db_manager, vector_store, embedding_generator)
+    vector_ops = VectorOperations(db_manager, vector_service, embedding_generator)
 
     # Show initial statistics
     print("\n📊 Current Statistics:")

@@ -1,6 +1,6 @@
 from w40k.usecases.answer import AnswerService
 from tests.fakes.fake_llm import FakeLLMClient
-from tests.fakes.fake_vector_ops import FakeVectorOperations
+from tests.fakes.fake_vector_service import FakeVectorService
 
 
 def test_diversify_mmr_limits_duplicates_and_article_repeats():
@@ -18,7 +18,7 @@ def test_diversify_mmr_limits_duplicates_and_article_repeats():
         }
         for i in range(6)
     ]
-    fake_vec = FakeVectorOperations(hits=hits)
+    fake_vec = FakeVectorService(hits=hits)
     svc = AnswerService(
         vector_operations=fake_vec,
         llm_client=FakeLLMClient(mode="ok"),
@@ -44,4 +44,3 @@ def test_diversify_mmr_limits_duplicates_and_article_repeats():
         key = (h.get("canonical_url"), section_key)
         assert key not in keys
         keys.add(key)
-

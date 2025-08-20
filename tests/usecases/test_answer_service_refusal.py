@@ -1,10 +1,10 @@
 from w40k.usecases.answer import AnswerService
-from tests.fakes.fake_vector_ops import FakeVectorOperations
+from tests.fakes.fake_vector_service import FakeVectorService
 from tests.fakes.fake_llm import FakeLLMClient
 
 
 def test_refusal_content_returns_error_and_no_answer():
-    vec_ops = FakeVectorOperations()
+    vec_ops = FakeVectorService()
     llm = FakeLLMClient(mode="refusal")
 
     svc = AnswerService(
@@ -22,4 +22,3 @@ def test_refusal_content_returns_error_and_no_answer():
     assert "cannot provide an answer" in result.answer.lower()
     assert result.citations == []
     assert result.confidence == 0.0
-

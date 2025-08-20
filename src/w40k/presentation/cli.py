@@ -29,7 +29,6 @@ class W40KChatCLI:
     
     def initialize(
         self,
-        db_path: str = "data/articles.db",
         initial_k: int = 60,
         min_score: Optional[float] = 0.2,
         max_context: int = 12,
@@ -37,25 +36,17 @@ class W40KChatCLI:
         expand_queries: int = 0,
         lower_threshold_on_empty: bool = True,
         active_only: bool = True,
-        use_sqlite: bool = True,
         verbose: bool = False,
     ) -> bool:
         """Initialize the answer service with given parameters."""
         
-        print(f"📚 Initializing W40K knowledge base: {db_path}")
-        
-        # Check database exists if we're using SQLite
-        if use_sqlite and not Path(db_path).exists():
-            print(f"❌ Database not found: {db_path}")
-            print("Please run the data pipeline scripts first to create the database.")
-            return False
+        print("📚 Initializing W40K knowledge base")
         
         try:
             if verbose:
                 print("  🔧 Setting up components...")
                 
             self.answer_service, self.stats = create_answer_service(
-                db_path=db_path,
                 initial_k=initial_k,
                 min_score=min_score,
                 max_context=max_context,
@@ -63,7 +54,6 @@ class W40KChatCLI:
                 expand_queries=expand_queries,
                 lower_threshold_on_empty=lower_threshold_on_empty,
                 active_only=active_only,
-                use_sqlite=use_sqlite,
                 settings=self.settings,
             )
             
@@ -72,8 +62,7 @@ class W40KChatCLI:
             print(f"🔌 Connection: {self.stats['connection_info']}")
             
             if self.stats['chunks_count'] != 'unknown':
-                coverage = self.stats.get('coverage_percentage', 0)
-                print(f"📊 Vector database: {self.stats['chunks_count']} chunks ({coverage:.1f}% coverage)")
+                print(f"📊 Vector database: {self.stats['chunks_count']} chunks")
             
             if self.stats.get('error'):
                 print(f"⚠️  Warning: {self.stats['error']}")
@@ -213,15 +202,11 @@ def main():
 Examples:
   %(prog)s                              # Interactive chat mode
   %(prog)s -q "Who is Horus?"           # Single query mode
-  %(prog)s --db data/custom.db -v       # Custom database with verbose output
+  %(prog)s -v                           # Verbose output
         """
     )
     
-    parser.add_argument(
-        "--db", 
-        default="data/articles.db",
-        help="Path to SQLite database (default: data/articles.db)"
-    )
+    # Note: Inference does not require SQLite; embeddings/ingestion scripts handle DB.
     parser.add_argument(
         "--verbose", "-v",
         action="store_true",
@@ -267,11 +252,6 @@ Examples:
         help="Include inactive chunks in vector search",
     )
     parser.add_argument(
-        "--no-sqlite",
-        action="store_true",
-        help="Use Qdrant-only mode (no SQLite database)",
-    )
-    parser.add_argument(
         "--query", "-q",
         type=str,
         help="Run a single query and exit (non-interactive mode)"
@@ -299,7 +279,6 @@ Examples:
     cli = W40KChatCLI()
     
     success = cli.initialize(
-        db_path=args.db,
         initial_k=args.k,
         min_score=args.min_score,
         max_context=args.max_context,
@@ -307,7 +286,6 @@ Examples:
         expand_queries=args.expand_queries,
         lower_threshold_on_empty=not args.no_relax_threshold,
         active_only=not args.include_inactive,
-        use_sqlite=not args.no_sqlite,
         verbose=args.verbose,
     )
     

@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 from ..core.models import QueryResult
 from ..ports.llm_client import LLMClient
-from ..ports.vector_operations import VectorOperationsPort
+from ..ports.vector_service import VectorServicePort
 from .utils import format_section_path, truncate_text
 from .prompts import (
     build_system_prompt,
@@ -23,7 +23,7 @@ class AnswerService:
 
     def __init__(
         self,
-        vector_operations: VectorOperationsPort,
+        vector_operations: VectorServicePort,
         llm_client: LLMClient,
         model: Optional[str] = None,
         initial_k: int = 60,

@@ -143,8 +143,7 @@ The application follows **hexagonal architecture** (ports and adapters pattern) 
 src/w40k/
 ├── adapters/              # External service implementations
 │   ├── llm/              # OpenAI & Anthropic LLM clients
-│   ├── persistence/      # Vector operations adapter
-│   └── vector_stores/    # Qdrant adapter
+│   └── vector_services/  # Qdrant vector service adapter
 ├── config/               # Settings and dependency injection
 ├── core/                 # Domain models and types
 ├── infrastructure/       # Infrastructure services
@@ -194,7 +193,7 @@ uv run pytest --cov=w40k --cov-report=html
 tests/
 ├── adapters/                 # Contract tests for LLM adapters
 ├── config/                   # Factory/config validation tests
-├── fakes/                    # Deterministic doubles (LLM, VectorOps)
+├── fakes/                    # Deterministic doubles (LLM, VectorService)
 ├── presentation/             # Streamlit utils tests
 └── usecases/                 # AnswerService behavior
 ```

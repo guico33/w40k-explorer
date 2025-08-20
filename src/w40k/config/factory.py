@@ -1,15 +1,12 @@
 """Factory for creating and configuring application services."""
 
-from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from .settings import Settings, get_settings
-from ..infrastructure.database.connection import DatabaseManager
 from ..infrastructure.rag.embeddings import EmbeddingGenerator  
-from ..infrastructure.rag.qdrant_vector_store import QdrantVectorStore
 from ..adapters.llm.openai_client import OpenAIClient
 from ..adapters.llm.anthropic_client import AnthropicClient
-from ..adapters.persistence.vector_operations_adapter import VectorOperationsAdapter
+from ..adapters.vector_services.qdrant_service import QdrantVectorService
 from ..usecases.answer import AnswerService
 from ..ports.llm_client import LLMClient
 
@@ -44,7 +41,6 @@ def create_llm_client(settings: Settings) -> LLMClient:
 
 
 def create_answer_service(
-    db_path: str = "data/articles.db",
     initial_k: int = 60,
     min_score: Optional[float] = 0.2,
     max_context: int = 12,
@@ -52,13 +48,11 @@ def create_answer_service(
     expand_queries: int = 0,
     lower_threshold_on_empty: bool = True,
     active_only: bool = True,
-    use_sqlite: bool = True,
     settings: Optional[Settings] = None,
 ) -> Tuple[AnswerService, Dict]:
     """Create and configure the answer service with all dependencies.
     
     Args:
-        db_path: Path to SQLite database
         initial_k: Number of initial chunks to retrieve
         min_score: Minimum similarity score threshold
         max_context: Maximum number of context chunks
@@ -66,7 +60,6 @@ def create_answer_service(
         expand_queries: Number of query expansions to generate
         lower_threshold_on_empty: Relax threshold when no hits found
         active_only: Only search active chunks
-        use_sqlite: Whether to use SQLite (if False, uses Qdrant-only mode)
         settings: Settings instance (if None, creates new one)
         
     Returns:
@@ -78,30 +71,12 @@ def create_answer_service(
     # Initialize settings
     if settings is None:
         settings = get_settings()
-    # Decide if we will use SQLite
-    will_use_sqlite = use_sqlite and Path(db_path).exists()
+    # SQLite is not required for inference
     
-    # Initialize database manager if available
-    db_manager = None
-    if will_use_sqlite:
-        db_manager = DatabaseManager(db_path)
-    
-    # Initialize Qdrant vector store
+    # Connection info
     if settings.is_qdrant_cloud():
-        vector_store = QdrantVectorStore(
-            url=settings.qdrant_url,
-            api_key=settings.qdrant_api_key,
-            collection_name=settings.qdrant_collection_name,
-            vector_size=settings.vector_size,
-        )
         connection_info = f"Qdrant Cloud: {settings.qdrant_url}"
     else:
-        vector_store = QdrantVectorStore(
-            host=settings.qdrant_host,
-            port=settings.qdrant_port,
-            collection_name=settings.qdrant_collection_name,
-            vector_size=settings.vector_size,
-        )
         connection_info = f"Local Qdrant: {settings.qdrant_host}:{settings.qdrant_port}"
     
     # Initialize embedding generator (always uses OpenAI for embeddings)
@@ -118,8 +93,16 @@ def create_answer_service(
         retry_delay=settings.retry_delay,
     )
     
-    # Initialize vector operations using the adapter
-    vector_ops = VectorOperationsAdapter(db_manager, vector_store, embedding_gen)
+    # Initialize vector service (creates its own Qdrant client)
+    vector_ops = QdrantVectorService(
+        embedding_gen,
+        collection_name=settings.qdrant_collection_name,
+        host=settings.qdrant_host,
+        port=settings.qdrant_port,
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key,
+        vector_size=settings.vector_size,
+    )
     
     # Initialize LLM client based on provider
     llm_client = create_llm_client(settings)
@@ -138,26 +121,21 @@ def create_answer_service(
         active_only=active_only,
     )
     
-    # Get collection stats
-    stats = {}
+    # Get vector store stats only (no SQLite-dependent coverage)
     try:
-        embedding_stats = vector_ops.get_embedding_stats()
+        col = vector_ops.get_collection_info() or {}
         stats = {
-            "chunks_count": embedding_stats.get("embeddings_in_qdrant", "unknown"),
-            "coverage_percentage": embedding_stats.get("coverage_percentage", 0),
+            "chunks_count": col.get("points_count", "unknown"),
             "provider": settings.llm_provider,
             "model": settings.get_llm_model(),
             "connection_info": connection_info,
-            "db_path": db_path if will_use_sqlite else "N/A (Qdrant-only mode)",
         }
     except Exception as e:
         stats = {
             "chunks_count": "unknown",
-            "coverage_percentage": 0,
             "provider": settings.llm_provider,
             "model": settings.get_llm_model(),
             "connection_info": connection_info,
-            "db_path": db_path if will_use_sqlite else "N/A (Qdrant-only mode)",
             "error": str(e),
         }
     

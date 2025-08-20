@@ -11,7 +11,7 @@ from .connection import DatabaseManager
 from .models import Chunk
 
 from ..rag.embeddings import EmbeddingGenerator
-from ..rag.qdrant_vector_store import QdrantVectorStore
+from ...ports.vector_service import VectorServicePort
 from ..rag.utils import create_qdrant_filters
 
 
@@ -21,18 +21,18 @@ class VectorOperations:
     def __init__(
         self,
         db_manager: Optional[DatabaseManager],
-        vector_store: QdrantVectorStore,
+        vector_service: VectorServicePort,
         embedding_generator: EmbeddingGenerator,
     ):
         """Initialize vector operations.
 
         Args:
             db_manager: Database manager for SQLite operations (None for Qdrant-only mode)
-            vector_store: Qdrant vector store instance
+            vector_service: Unified vector service instance
             embedding_generator: Embedding generator instance
         """
         self.db_manager = db_manager
-        self.vector_store = vector_store
+        self.vector_service = vector_service
         self.embedding_generator = embedding_generator
 
     def get_chunks_without_embeddings(
@@ -174,10 +174,8 @@ class VectorOperations:
                 print(
                     f"   📤 Uploading {len(batch_successful_embeddings)} embeddings to Qdrant..."
                 )
-                batch_uploaded_count, batch_successful_point_ids = (
-                    self.vector_store.upsert_chunks(
-                        batch_successful_embeddings, batch_size=batch_size
-                    )
+                batch_uploaded_count, batch_successful_point_ids = self.vector_service.upsert_chunks(
+                    batch_successful_embeddings, batch_size=batch_size
                 )
                 total_uploaded += batch_uploaded_count
 
@@ -224,7 +222,7 @@ class VectorOperations:
             "total_processed": len(chunks),
             "successful_uploads": total_uploaded,
             "failed_embeddings": len(total_failed_chunks),
-            "collection_info": self.vector_store.get_collection_info(),
+            "collection_info": self.vector_service.get_collection_info(),
         }
         stats.update(additional_stats)
 
@@ -269,41 +267,15 @@ class VectorOperations:
         )
 
         # Search in Qdrant
-        results = self.vector_store.search(
-            query_vector=query_embedding,
+        return self.vector_service.search_similar_chunks(
+            query_text=query_text,
             limit=limit,
-            filter_conditions=filter_conditions,
-            score_threshold=min_score,
+            article_ids=article_ids,
+            block_types=block_types,
+            lead_only=lead_only,
+            min_score=min_score,
+            active_only=active_only,
         )
-
-        # Format results
-        formatted_results = []
-        for result in results:
-            payload = result.payload or {}
-            formatted_results.append(
-                {
-                    "point_id": result.id,  # Keep Qdrant point ID for debugging
-                    "chunk_uid": payload.get(
-                        "chunk_uid"
-                    ),  # FIX: Use original chunk UID
-                    "score": result.score,
-                    "article_id": payload.get("article_id"),
-                    "article_title": payload.get("article_title"),
-                    "text": payload.get("text"),
-                    "block_type": payload.get("block_type"),
-                    "lead": payload.get("lead"),
-                    "section_path": payload.get("section_path"),
-                    "canonical_url": payload.get("canonical_url"),
-                    "token_count": payload.get("token_count"),
-                    "kv_preview": payload.get("kv_preview"),
-                    "kv_data": payload.get("kv_data"),  # ADD: Expose structured KV data
-                    "links_out": payload.get(
-                        "links_out"
-                    ),  # ADD: For future link expansion
-                }
-            )
-
-        return formatted_results
 
     def get_embedding_stats(self) -> Dict:
         """Get comprehensive statistics about embeddings.
@@ -312,7 +284,7 @@ class VectorOperations:
             Dictionary with embedding statistics
         """
         # Get Qdrant stats
-        collection_info = self.vector_store.get_collection_info() or {}
+        collection_info = self.vector_service.get_collection_info() or {}
         embeddings_count = int(collection_info.get("points_count", 0))
 
         # Get SQLite chunk stats if available
@@ -371,7 +343,7 @@ class VectorOperations:
             inactive_uids = [chunk.chunk_uid for chunk in inactive_chunks]
             print(f"🗑️  Removing {len(inactive_uids)} inactive chunk embeddings...")
 
-            success = self.vector_store.delete_points(inactive_uids)
+            success = self.vector_service.delete_points(inactive_uids)
             if success:
                 print(f"✅ Removed {len(inactive_uids)} embeddings")
                 return len(inactive_uids)
@@ -402,7 +374,7 @@ class VectorOperations:
 
         if force_recreate:
             print("🗑️  Force recreate: clearing existing collection...")
-            self.vector_store.create_collection(recreate=True)
+            self.vector_service.create_collection(recreate=True)
             # Reset all embedding tracking when force recreating
             with next(self.db_manager.get_session()) as session:
                 chunks = session.exec(select(Chunk)).all()
@@ -416,7 +388,7 @@ class VectorOperations:
                 print(f"🔄 Reset embedding tracking for {len(chunks):,} chunks")
 
         # Ensure collection exists
-        if not self.vector_store.create_collection():
+        if not self.vector_service.create_collection():
             return {"error": "Failed to create Qdrant collection"}
 
         # Get statistics before sync

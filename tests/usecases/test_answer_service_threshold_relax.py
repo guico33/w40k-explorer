@@ -1,11 +1,11 @@
 from w40k.usecases.answer import AnswerService
-from tests.fakes.fake_vector_ops import FakeVectorOperations
+from tests.fakes.fake_vector_service import FakeVectorService
 from tests.fakes.fake_llm import FakeLLMClient
 
 
 def test_threshold_relaxation_recovers_when_no_hits_initially():
     # Fake hits with scores below 0.99 so first pass (min_score=0.99) yields none
-    vec_ops = FakeVectorOperations()
+    vec_ops = FakeVectorService()
     llm = FakeLLMClient(mode="ok")
 
     svc = AnswerService(
@@ -26,4 +26,3 @@ def test_threshold_relaxation_recovers_when_no_hits_initially():
     assert vec_ops.queries, "Expected that searches were made"
     # First round has at least one query; second round adds more queries
     assert len(vec_ops.queries) >= 2
-

@@ -19,7 +19,7 @@ from w40k.infrastructure.rag.embeddings import (
     EmbeddingGenerator,
     validate_embedding_dimensions,
 )
-from w40k.infrastructure.rag.qdrant_vector_store import QdrantVectorStore
+from w40k.adapters.vector_services.qdrant_service import QdrantVectorService
 
 
 def test_embeddings():
@@ -106,21 +106,23 @@ def test_embeddings():
 
     try:
         if settings.is_qdrant_cloud():
-            vector_store = QdrantVectorStore(
+            vector_service = QdrantVectorService(
+                embedding_generator,
                 collection_name="test_w40k_chunks",
                 url=settings.qdrant_url,
                 api_key=settings.qdrant_api_key,
                 vector_size=1536,
             )
         else:
-            vector_store = QdrantVectorStore(
+            vector_service = QdrantVectorService(
+                embedding_generator,
                 collection_name="test_w40k_chunks",
                 host=settings.qdrant_host,
                 port=settings.qdrant_port,
                 vector_size=1536,
             )
 
-        if not vector_store.health_check():
+        if not vector_service.health_check():
             print("⚠️  Qdrant not available - skipping vector store tests")
             return 0
 
@@ -132,7 +134,7 @@ def test_embeddings():
 
     # Create test collection
     print("🏗️  Creating test collection...")
-    if not vector_store.create_collection(recreate=True):
+    if not vector_service.create_collection(recreate=True):
         print("❌ Failed to create collection")
         return 1
 
@@ -145,7 +147,7 @@ def test_embeddings():
         for chunk, embedding in chunks_with_embeddings
         if embedding is not None
     ]
-    uploaded_count, _ = vector_store.upsert_chunks(
+    uploaded_count, _ = vector_service.upsert_chunks(
         valid_chunks_with_embeddings, batch_size=5
     )
 
@@ -162,28 +164,30 @@ def test_embeddings():
         query_text = sample_chunks[0].text[:100] + "..."
         print(f"   Query: {query_text}")
 
-        search_results = vector_store.search(query_vector=embeddings[0], limit=3)
+        # Use service high-level search by text
+        search_results = vector_service.search_similar_chunks(
+            query_text=sample_chunks[0].text, limit=3
+        )
 
         print(f"✅ Found {len(search_results)} search results")
         for i, result in enumerate(search_results):
-            title = (
-                result.payload.get("article_title", "Unknown")
-                if result.payload
-                else "Unknown"
-            )
-            print(f"   {i+1}. Score: {result.score:.3f} - {title}")
+            title = result.get("article_title", "Unknown")
+            score = result.get("score", 0.0)
+            print(f"   {i+1}. Score: {score:.3f} - {title}")
 
     # Get collection info
     print("\n📊 Collection Statistics:")
-    info = vector_store.get_collection_info()
+    info = vector_service.get_collection_info()
     for key, value in info.items():
         print(f"   {key}: {value}")
 
     # Clean up test collection
     print("\n🧹 Cleaning up test collection...")
     try:
-        vector_store.client.delete_collection("test_w40k_chunks")
-        print("✅ Cleaned up test collection")
+        if vector_service.delete_collection():
+            print("✅ Cleaned up test collection")
+        else:
+            print("⚠️  Cleanup warning: delete_collection returned False")
     except Exception as e:
         print(f"⚠️  Cleanup warning: {e}")
 

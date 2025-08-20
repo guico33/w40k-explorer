@@ -1,10 +1,10 @@
 from w40k.usecases.answer import AnswerService
-from tests.fakes.fake_vector_ops import FakeVectorOperations
+from tests.fakes.fake_vector_service import FakeVectorService
 from tests.fakes.fake_llm import FakeLLMClient
 
 
 def test_answer_service_parses_json_and_builds_citations():
-    vec_ops = FakeVectorOperations()
+    vec_ops = FakeVectorService()
     llm = FakeLLMClient(mode="ok")
 
     svc = AnswerService(
@@ -27,4 +27,3 @@ def test_answer_service_parses_json_and_builds_citations():
     assert "title" in c0 and "section" in c0 and "url" in c0
     # Confidence should be within 0-1 bounds
     assert 0.0 <= result.confidence <= 1.0
-
