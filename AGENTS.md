@@ -5,7 +5,7 @@ This guide helps contributors work effectively in w40k-explorer.
 ## Project Structure & Modules
 - `src/`: Application code
   - `scraper/`: URL collection and HTML fetching
-  - `rag/`: Chunking, embeddings, and Qdrant vector store
+  - `rag/`: Chunking, embeddings, and vector store integration
   - `database/`: SQLite models, sessions, vector ops
   - `engine/`: Query engine and helpers
   - `ui/`: Placeholder for Streamlit
@@ -30,7 +30,7 @@ Use uv (preferred) or pip.
 ## Testing Guidelines
 - Framework: `pytest` (and `pytest-asyncio` when needed).
 - Location: `tests/`
-- Conventions: name tests `test_*.py`, arrange Given/When/Then, avoid network by default; mark integration tests that require OpenAI/Qdrant and guard with env checks.
+- Conventions: name tests `test_*.py`, arrange Given/When/Then, avoid network by default; mark integration tests that require OpenAI/LLM or the vector service and guard with env checks.
 
 ## Commit & Pull Request Guidelines
 - Commits: Imperative, concise, scoped (e.g., "Implement structure-aware chunking pipeline").
@@ -41,5 +41,4 @@ Use uv (preferred) or pip.
 
 ## Security & Config Tips
 - Copy `.env.example` to `.env` and set: `OPENAI_API_KEY`, `OPENAI_LLM_MODEL`, `EMBEDDING_MODEL`; optionally `QDRANT_URL`, `QDRANT_API_KEY`.
-- Do not commit secrets or `data/` artifacts. Keep queries deterministic in tests by mocking OpenAI/Qdrant.
-
+- Do not commit secrets or `data/` artifacts. Keep queries deterministic in tests by mocking LLM and vector service adapters.

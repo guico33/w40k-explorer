@@ -29,7 +29,7 @@ This is a Warhammer 40k RAG (Retrieval-Augmented Generation) application that sc
 - Fetching raw html for each wiki page and storing in sqlite database: Done
 - Parsing HTML and extracting relevant content to store in sqlite database: Done
 - Creating chunks from extracted content and storing in sqlite database: Done
-- Generating embeddings from text chunks and storing in Qdrant vector database: Done
+- Generating embeddings from text chunks and storing in the vector database (Qdrant/Pinecone): Done
 
 ## Next Step 
 

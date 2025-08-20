@@ -1,4 +1,4 @@
-# ⚔️ Warhammer 40K Explorer
+# Warhammer 40K Explorer
 
 ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
 ![OpenAI](https://img.shields.io/badge/OpenAI-74aa9c?style=for-the-badge&logo=openai&logoColor=white)
