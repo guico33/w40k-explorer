@@ -77,3 +77,6 @@ htmlcov/
 .uv/
 
 screenshots/
+
+evals/runs/
+

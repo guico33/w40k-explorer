@@ -10,7 +10,7 @@
 
 A Retrieval-Augmented Generation (RAG) application that provides an interactive chat interface for exploring Warhammer 40K lore. The system scrapes content from the Warhammer 40K Fandom wiki and uses vector embeddings to enable semantic search and AI-powered responses.
 
-Built with [hexagonal architecture](https://en.wikipedia.org/wiki/Hexagonal_architecture_(software)) for maximum flexibility - supports both OpenAI and Anthropic LLM providers with easy provider switching via environment variables.
+Built with [hexagonal architecture](https://en.wikipedia.org/wiki/Hexagonal_architecture_(software)) for maximum flexibility - supports both OpenAI and Anthropic LLM providers, plus Qdrant and Pinecone vector databases, with easy provider switching via environment variables.
 
 🌐 **Live Application:** [w40k-explorer.streamlit.app](https://w40k-explorer.streamlit.app/)
 
@@ -114,7 +114,7 @@ uv run streamlit run src/w40k/presentation/streamlit/app.py
 
 **Command Line Interface:**
 ```bash
-uv run python -m src.w40k.presentation.cli "Tell me about the Emperor of Mankind"
+PYTHONPATH=src uv run python -m w40k.presentation.cli -q "Tell me about the Emperor of Mankind"
 ```
 
 ## Architecture
@@ -145,6 +145,12 @@ src/w40k/
 │   └── vector_services/  # Vector service adapters (Qdrant, Pinecone)
 ├── config/               # Settings and dependency injection
 ├── core/                 # Domain models and types
+├── evals/                # Evaluation framework
+│   ├── dataset.py        # Dataset loading and QA item models
+│   ├── judges.py         # LLM-based binary judges
+│   ├── metrics.py        # Deterministic evaluation metrics
+│   ├── report.py         # Result aggregation and reporting
+│   └── qa_dataset.jsonl  # W40K evaluation dataset
 ├── infrastructure/       # Infrastructure services
 │   ├── database/         # SQLite operations
 │   ├── rag/             # Parsing, chunking, embeddings
@@ -157,6 +163,7 @@ src/w40k/
     └── answer.py       # Query processing service
 
 scripts/                # Utility scripts for data processing
+├── run_evals.py        # Main evaluation script with parallel processing
 ```
 
 ## Ingestion (Embeddings)
@@ -179,14 +186,82 @@ Flags:
 - `--retry-failed` retries any chunks previously marked as failed
 - `--dry-run` shows what would be processed without calling APIs
 
+## Evaluation Framework
+
+The project includes a minimal evaluation framework for assessing RAG system performance with both deterministic metrics and LLM-based judges.
+
+### Quick Start
+
+```bash
+# Run evaluation on dataset with 5 parallel workers (default)
+uv run python scripts/run_evals.py --dataset src/w40k/evals/qa_dataset.jsonl --subset 5 -v
+
+# Custom worker count and vector provider
+uv run python scripts/run_evals.py --subset 10 --max-workers 3 --vector-provider qdrant
+
+# Full dataset evaluation  
+uv run python scripts/run_evals.py --dataset src/w40k/evals/qa_dataset.jsonl
+```
+
+### Environment Variables
+
+```bash
+# Evaluation-specific models (optional, falls back to main LLM models)
+TEST_MODEL=gpt-4o-mini-2024-07-18     # Model for generating answers
+EVAL_MODEL=gpt-4o-mini-2024-07-18     # Model for LLM judges
+```
+
+### Metrics
+
+**Deterministic Metrics:**
+- **JSON OK**: Valid structured response format
+- **Citations Valid**: All citations reference provided context
+- **Context Coverage**: Fraction of expected sources found in retrieved context
+- **Refusal Rate**: Percentage of safety/refusal responses
+
+**LLM-Based Judges:**
+- **Grounded**: Answer supported by provided context (binary judgment)
+- **Relevant**: Answer addresses the question appropriately (binary judgment)
+
+**Confidence Calibration:**
+- **Expected Calibration Error (ECE)**: Measures alignment between predicted confidence and actual correctness
+
+### Dataset Format
+
+Questions are stored as JSONL with the following structure:
+```json
+{
+  "id": "unique-identifier",
+  "question": "What is the Emperor of Mankind?",
+  "expected_sources": ["https://warhammer40k.fandom.com/wiki/Emperor_of_Mankind"]
+}
+```
+
+### Output Structure
+
+Each evaluation run creates a timestamped directory in `evals/runs/` containing:
+- `report.md`: Summary metrics and statistics
+- `samples.jsonl`: Detailed per-sample results
+- `summary.json`: Aggregated metrics in JSON format
+- `meta.json`: Run configuration and metadata
+- `run.log`: Detailed execution logs
+
+### Parallel Processing
+
+The framework supports parallel evaluation with configurable concurrency:
+- `--max-workers N`: Set maximum concurrent evaluations (default: 5)
+- Optimized for I/O-bound operations (API calls)
+- Real-time progress tracking and result streaming
+- Thread-safe result aggregation
+
 ## Testing
 
 The test suite currently focuses on the inference path.
 
 - Philosophy: deterministic, no network, tests behavior (no implementation details).
-- What’s covered:
+- What's covered:
   - AnswerService: JSON parsing, citation construction, truncation retry, threshold relaxation, refusal handling, confidence clamping, MMR de‑dup.
-  - Adapters (contracts): OpenAI and Anthropic return “Responses‑like” objects `status/output/message/output_text` that the use case parses.
+  - Adapters (contracts): OpenAI and Anthropic return "Responses‑like" objects `status/output/message/output_text` that the use case parses.
   - Streamlit utils: citation remapping `[ID]` → sequential `[1]`, ordered sources.
   - Config/Factory: provider selection and embedding preconditions validated.
 
