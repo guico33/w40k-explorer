@@ -4,12 +4,14 @@ Supports running as a script by falling back to add `<repo>/src` to sys.path
 when the `w40k` package is not importable.
 """
 
+import base64
 import sys
 from pathlib import Path
 from typing import Optional
 
 import streamlit as st
 from dotenv import load_dotenv
+from streamlit.components.v1 import html as st_html
 
 # Load environment variables
 load_dotenv()
@@ -31,16 +33,272 @@ except Exception:
     )
 
 
+def get_base64_image(image_path):
+    """Convert image to base64 string for CSS embedding."""
+    try:
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    except FileNotFoundError:
+        return None
+
+
+def get_chat_avatar(role: str):
+    """Get the appropriate avatar for chat messages."""
+    current_dir = Path(__file__).parent
+    if role == "user":
+        avatar_path = current_dir / "assets" / "user.png"
+    else:  # assistant
+        avatar_path = current_dir / "assets" / "assistant.png"
+
+    if avatar_path.exists():
+        return str(avatar_path)
+    return None
+
+
+def get_themed_icon(icon_type: str, size: int = 20) -> str:
+    """Get themed icon as base64 embedded HTML."""
+    current_dir = Path(__file__).parent
+    icon_mapping = {"gear": "gear.png", "seal": "seal.png", "book": "book.png"}
+
+    if icon_type not in icon_mapping:
+        return ""
+
+    icon_path = current_dir / "assets" / icon_mapping[icon_type]
+    if not icon_path.exists():
+        return ""
+
+    base64_icon = get_base64_image(icon_path)
+    if base64_icon:
+        return f'<img src="data:image/png;base64,{base64_icon}" width="{size}" height="{size}" style="vertical-align: middle; margin-right: 8px;">'
+    return ""
+
+
+def add_background_image():
+    """Add the Warhammer 40K background image with CSS."""
+    # Get the path to the background image
+    current_dir = Path(__file__).parent
+    image_path = current_dir / "assets" / "background.jpg"
+
+    # Convert image to base64
+    base64_image = get_base64_image(image_path)
+
+    if base64_image:
+        st.markdown(
+            f"""
+        <style>
+        /* Import Gothic fonts */
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Uncial+Antiqua&family=Pirata+One&display=swap');
+        
+        /* CSS Variables for W40K Theme */
+        :root {{
+            --w40k-gold: #c9aa71;
+            --w40k-gold-alpha-30: rgba(201, 170, 113, 0.3);
+            --w40k-gold-alpha-60: rgba(201, 170, 113, 0.6);
+            --w40k-dark-overlay: rgba(0, 0, 0, 0.3);
+        }}
+        
+        .stApp {{
+            background-image: url("data:image/jpeg;base64,{base64_image}");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+        }}
+
+        /* Eliminate any global top spacing */
+        html, body {{
+            margin: 0 !important;
+            padding: 0 !important;
+        }}
+        [data-testid="stAppViewContainer"] {{
+            padding-top: 0 !important;
+        }}
+        section.main {{
+            padding-top: 0 !important;
+            margin-top: 0 !important;
+        }}
+
+        /* Remove Streamlit default top header space */
+        [data-testid="stHeader"] {{
+            display: none !important;
+            height: 0 !important;
+            visibility: hidden !important;
+        }}
+
+        /* Disable smooth scroll to reduce jumpiness on anchor updates */
+        html {{
+            scroll-behavior: auto !important;
+        }}
+        
+        /* Add semi-transparent overlay for better readability */
+        .stApp::before {{
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: -1;
+            pointer-events: none;
+        }}
+        
+        /* Gothic title styling - ONLY for the main title */
+        .block-container > div:first-child h1 {{
+            font-family: 'Cinzel', 'Uncial Antiqua', 'Times New Roman', serif !important;
+            font-weight: 700 !important;
+            font-size: 3.5rem !important;
+            text-align: center !important;
+            color: var(--w40k-gold) !important;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8), 
+                         0 0 10px var(--w40k-gold-alpha-30) !important;
+            margin-top: 0 !important;
+            margin-bottom: 0.5rem !important;
+            letter-spacing: 2px !important;
+        }}
+        
+        /* Hide anchor links from headers */
+        .stHeaderActionElements,
+        [data-testid="stHeaderActionElements"] {{
+            display: none !important;
+        }}
+        
+        /* Also hide anchor links in expanders and other headers */
+        .streamlit-expanderHeader [data-testid="stHeaderActionElements"],
+        h1 [data-testid="stHeaderActionElements"],
+        h2 [data-testid="stHeaderActionElements"],
+        h3 [data-testid="stHeaderActionElements"] {{
+            display: none !important;
+        }}
+
+        /* Ensure any residual header anchor elements don't capture clicks */
+        .streamlit-expanderHeader a[href^="#"],
+        h1 a[href^="#"],
+        h2 a[href^="#"],
+        h3 a[href^="#"] {{
+            pointer-events: none !important;
+        }}
+        
+        /* Enhance text readability and tighten top spacing */
+        .main .block-container {{
+            background: var(--w40k-dark-overlay);
+            backdrop-filter: blur(2px);
+            border-radius: 10px;
+            padding: 0 2rem 2rem 2rem !important;
+            margin-top: 0 !important;
+        }}
+        
+        /* Remove any default top margin from the first block */
+        .block-container > div:first-child {{
+            margin-top: 0 !important;
+        }}
+        .block-container {{
+            padding-top: 0 !important;
+        }}
+        
+        /* Sidebar styling */
+        .css-1d391kg {{
+            background: rgba(20, 20, 30, 0.9);
+            backdrop-filter: blur(10px);
+        }}
+        
+        /* Chat message containers */
+        .stChatMessage {{
+            background: rgba(40, 40, 50, 0.8);
+            backdrop-filter: blur(5px);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }}
+        
+        /* Larger font for all chat messages */
+        .stChatMessage p,
+        .stChatMessage .stMarkdown p {{
+            font-size: 1.15rem !important;
+            line-height: 1.6 !important;
+        }}
+        
+        /* Mobile Responsiveness */
+        @media (max-width: 768px) {{
+            /* Smaller title on mobile */
+            .block-container > div:first-child h1 {{
+                font-size: 2.5rem !important;
+                letter-spacing: 1px !important;
+            }}
+            
+            /* Adjust container padding for mobile */
+            .main .block-container {{
+                padding: 0 1rem 1rem 1rem !important;
+            }}
+            
+            /* Smaller chat message font on very small screens */
+            .stChatMessage p,
+            .stChatMessage .stMarkdown p {{
+                font-size: 1rem !important;
+            }}
+        }}
+        
+        @media (max-width: 480px) {{
+            /* Even smaller title on very small screens */
+            .block-container > div:first-child h1 {{
+                font-size: 2rem !important;
+            }}
+            
+            /* Tighter padding on small screens */
+            .main .block-container {{
+                padding: 0 0.5rem 0.5rem 0.5rem !important;
+            }}
+        }}
+        </style>
+        """,
+            unsafe_allow_html=True,
+        )
+
+
+def disable_anchor_scroll_behavior():
+    """Inject JS to neutralize hash-anchor clicks that can cause page jumps.
+
+    Some Streamlit builds add anchor links to headings. Even when hidden, these can
+    still update `location.hash` and trigger scroll jumps. This script prevents
+    default for anchor clicks whose href starts with '#', and clears any existing
+    hash on load.
+    """
+    st_html(
+        """
+        <script>
+        (function() {
+          function isHashLink(el) { return el && el.getAttribute && /^#/.test(el.getAttribute('href')||''); }
+          document.addEventListener('click', function(ev){
+            var a = ev.target.closest ? ev.target.closest('a') : null;
+            if (isHashLink(a)) {
+              ev.preventDefault();
+              return false;
+            }
+          }, true);
+          if (location.hash) {
+            try { history.replaceState('', document.title, location.pathname + location.search); } catch(e) {}
+          }
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
 def initialize_app():
     """Initialize the Streamlit app."""
     st.set_page_config(
         page_title="Warhammer 40K Knowledge Base",
-        page_icon="⚔️",
+        page_icon="🏛️",
         layout="wide",
         initial_sidebar_state="collapsed",
     )
 
-    st.title("⚔️ Warhammer 40K Knowledge Base")
+    # Add the background image
+    add_background_image()
+    # Disable anchor scroll behavior to avoid jumpy expanders/headings
+    disable_anchor_scroll_behavior()
+
+    st.title("Warhammer 40K Knowledge Base")
     st.markdown("*Ask any question about the grim darkness of the far future...*")
 
     # Validate environment
@@ -61,23 +319,33 @@ def get_answer_service():
             answer_service, stats = create_answer_service()
 
         # Unified success message (no SQLite distinction)
-        st.success("✅ Knowledge base initialized")
+        seal_icon = get_themed_icon("seal", size=24)
+        st.markdown(
+            f"""
+        <div style='padding: 0.75rem; background: var(--w40k-gold-alpha-30); border: 1px solid var(--w40k-gold-alpha-60); border-radius: 0.375rem; color: var(--w40k-gold); margin: 1rem 0; text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);'>
+            {seal_icon}<strong>Knowledge base initialized</strong>
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
 
-        # Show stats in sidebar
+        # Show stats in sidebar - collapsible and collapsed by default
         with st.sidebar:
-            st.header("📊 System Status")
-            st.metric("Vector Database", f"{stats['chunks_count']} chunks")
-            # Optional provider if present
-            if "provider" in stats:
-                st.info(f"**Provider**: {str(stats['provider']).title()}")
-            st.info(f"**Model**: {stats['model']}")
-            st.info(f"**Connection**: {stats['connection_info']}")
+            with st.expander("System Status", expanded=False):
+                st.metric("Vector Database", f"{stats['chunks_count']} chunks")
+                # Optional provider if present
+                if "provider" in stats:
+                    st.info(f"**Provider**: {str(stats['provider']).title()}")
+                st.info(f"**Model**: {stats['model']}")
+                st.info(f"**Connection** - {stats['connection_info']}")
 
         return answer_service
 
     except Exception as e:
         st.error(f"❌ **Initialization Error**: {str(e)}")
-        st.info("Please check your vector service connection and environment variables.")
+        st.info(
+            "Please check your vector service connection and environment variables."
+        )
         st.stop()
 
 
@@ -89,7 +357,8 @@ def initialize_session_state():
 
 def display_message(role: str, content: str, result: Optional[QueryResult] = None):
     """Display a chat message with optional query result metadata."""
-    with st.chat_message(role):
+    avatar = get_chat_avatar(role)
+    with st.chat_message(role, avatar=avatar):
         if result and role == "assistant":
             _render_assistant_output(content, result)
         else:
@@ -105,7 +374,8 @@ def _render_assistant_output(answer_text: str, result: QueryResult) -> None:
     st.markdown(remapped_answer)
 
     # Display sources inline (as before)
-    st.markdown("**📚 Sources:**")
+    book_icon = get_themed_icon("book", size=24)
+    st.markdown(f"**{book_icon}Sources:**", unsafe_allow_html=True)
     if not result.citations and not getattr(result, "citations_used", []):
         st.info("Sources unavailable: structured output missing or invalid JSON.")
     else:
@@ -115,7 +385,9 @@ def _render_assistant_output(answer_text: str, result: QueryResult) -> None:
     if getattr(result, "context_items", None) and result.citations:
         # Build mapping original context id -> sequential number based on sources order
         id_to_seq = {
-            c.get("id"): i + 1 for i, c in enumerate(result.citations) if c.get("id") is not None
+            c.get("id"): i + 1
+            for i, c in enumerate(result.citations)
+            if c.get("id") is not None
         }
         if id_to_seq:
             with st.expander("Show full passages"):
@@ -131,13 +403,8 @@ def _render_assistant_output(answer_text: str, result: QueryResult) -> None:
                             st.markdown(f"[Link]({ctx['url']})")
 
     # Display metadata
-    confidence_color = (
-        "green"
-        if result.confidence > 0.7
-        else "orange" if result.confidence > 0.5 else "red"
-    )
     metadata_text = (
-        f"*Confidence: <span style='color:{confidence_color}'>{result.confidence:.2f}</span> • "
+        f"*Confidence: <span style='color:var(--w40k-gold); font-weight: bold;'>{result.confidence:.2f}</span> • "
         f"Query time: {result.query_time_ms}ms*"
     )
     st.markdown(metadata_text, unsafe_allow_html=True)
@@ -171,8 +438,9 @@ def main():
         display_message("user", prompt)
 
         # Generate response
-        with st.chat_message("assistant"):
-            with st.spinner("🤔 Searching the archives..."):
+        assistant_avatar = get_chat_avatar("assistant")
+        with st.chat_message("assistant", avatar=assistant_avatar):
+            with st.spinner("Searching the archives..."):
                 try:
                     result = answer_service.answer_query(prompt)
 
