@@ -7,6 +7,7 @@ from ..infrastructure.rag.embeddings import EmbeddingGenerator
 from ..adapters.llm.openai_client import OpenAIClient
 from ..adapters.llm.anthropic_client import AnthropicClient
 from ..adapters.vector_services.qdrant_service import QdrantVectorService
+from ..adapters.vector_services.pinecone_service import PineconeVectorService
 from ..usecases.answer import AnswerService
 from ..ports.llm_client import LLMClient
 
@@ -73,11 +74,16 @@ def create_answer_service(
         settings = get_settings()
     # SQLite is not required for inference
     
-    # Connection info
-    if settings.is_qdrant_cloud():
-        connection_info = f"Qdrant Cloud: {settings.qdrant_url}"
+    # Connection info (vector service)
+    if settings.vector_provider == "qdrant":
+        if settings.is_qdrant_cloud():
+            connection_info = f"Qdrant Cloud: {settings.qdrant_url}"
+        else:
+            connection_info = f"Local Qdrant: {settings.qdrant_host}:{settings.qdrant_port}"
+    elif settings.vector_provider == "pinecone":
+        connection_info = f"Pinecone Index: {settings.pinecone_index}"
     else:
-        connection_info = f"Local Qdrant: {settings.qdrant_host}:{settings.qdrant_port}"
+        connection_info = "Vector service: unknown"
     
     # Initialize embedding generator (always uses OpenAI for embeddings)
     # Note: Even when using Anthropic for LLM, we still use OpenAI for embeddings
@@ -93,16 +99,28 @@ def create_answer_service(
         retry_delay=settings.retry_delay,
     )
     
-    # Initialize vector service (creates its own Qdrant client)
-    vector_ops = QdrantVectorService(
-        embedding_gen,
-        collection_name=settings.qdrant_collection_name,
-        host=settings.qdrant_host,
-        port=settings.qdrant_port,
-        url=settings.qdrant_url,
-        api_key=settings.qdrant_api_key,
-        vector_size=settings.vector_size,
-    )
+    # Initialize vector service based on provider
+    settings.validate_vector_provider()
+    if settings.vector_provider == "qdrant":
+        vector_ops = QdrantVectorService(
+            embedding_gen,
+            collection_name=settings.qdrant_collection_name,
+            host=settings.qdrant_host,
+            port=settings.qdrant_port,
+            url=settings.qdrant_url,
+            api_key=settings.qdrant_api_key,
+            vector_size=settings.vector_size,
+        )
+    elif settings.vector_provider == "pinecone":
+        vector_ops = PineconeVectorService(
+            embedding_gen,
+            api_key=settings.pinecone_api_key or "",
+            index_name=settings.pinecone_index or "w40k",
+            vector_size=settings.vector_size,
+            metric="cosine",
+        )
+    else:
+        raise ValueError(f"Unsupported vector provider: {settings.vector_provider}")
     
     # Initialize LLM client based on provider
     llm_client = create_llm_client(settings)

@@ -5,6 +5,7 @@
 ![Anthropic](https://img.shields.io/badge/Anthropic-191919?style=for-the-badge&logo=anthropic&logoColor=white)
 ![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)
 ![Qdrant](https://img.shields.io/badge/Qdrant-DC244C?style=for-the-badge&logo=qdrant&logoColor=white)
+![Pinecone](https://img.shields.io/badge/Pinecone-3771E0?style=for-the-badge&logo=pinecone&logoColor=white)
 ![SQLite](https://img.shields.io/badge/sqlite-%2307405e.svg?style=for-the-badge&logo=sqlite&logoColor=white)
 
 A Retrieval-Augmented Generation (RAG) application that provides an interactive chat interface for exploring Warhammer 40K lore. The system scrapes content from the Warhammer 40K Fandom wiki and uses vector embeddings to enable semantic search and AI-powered responses.
@@ -59,7 +60,7 @@ This design balances **recall** (finding all relevant passages), **precision** (
 
 - Python 3.11+
 - LLM Provider API key (OpenAI or Anthropic)
-- Remote Qdrant vector database or local Qdrant instance 
+- Vector database: Qdrant (cloud or local) or Pinecone
 
 ### Environment Setup
 
@@ -76,34 +77,32 @@ run uv sync --all-extras
 
 3. Create `.env` file:
 
-**Option A: OpenAI Provider (Default)**
 ```bash
-# LLM Configuration
-LLM_PROVIDER=openai
+# LLM Provider Selection (choose one)
+LLM_PROVIDER=openai  # openai or anthropic
+
+# OpenAI Configuration (required for embeddings, optional for LLM)
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_LLM_MODEL=gpt-4o-mini-2024-07-18
 EMBEDDING_MODEL=text-embedding-3-small
 
-# Qdrant Configuration (Cloud)
+# Anthropic Configuration (only required if LLM_PROVIDER=anthropic)
+# ANTHROPIC_API_KEY=your_anthropic_api_key
+# ANTHROPIC_LLM_MODEL=claude-3-7-sonnet-latest
+
+# Vector Database Selection (choose one)
+VECTOR_PROVIDER=qdrant  # qdrant or pinecone
+
+# Qdrant Configuration (if VECTOR_PROVIDER=qdrant)
 QDRANT_URL=https://your-cluster.qdrant.tech
 QDRANT_API_KEY=your_qdrant_api_key
-
-# Or Qdrant Configuration (Local)
+# Or for local Qdrant:
 # QDRANT_HOST=localhost
 # QDRANT_PORT=6333
-```
 
-**Option B: Anthropic Provider**
-```bash
-# LLM Configuration
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=your_anthropic_api_key
-ANTHROPIC_LLM_MODEL=claude-3-7-sonnet-latest
-OPENAI_API_KEY=your_openai_api_key  # Still required for embeddings
-
-# Qdrant Configuration (same as above)
-QDRANT_URL=https://your-cluster.qdrant.tech
-QDRANT_API_KEY=your_qdrant_api_key
+# Pinecone Configuration (if VECTOR_PROVIDER=pinecone)
+# PINECONE_API_KEY=your_pinecone_api_key
+# PINECONE_INDEX=your_index_name
 ```
 
 ### Running the Application
@@ -133,7 +132,7 @@ The application follows **hexagonal architecture** (ports and adapters pattern) 
 
 ### Key Components
 - **LLM Providers**: Pluggable OpenAI/Anthropic clients via adapter pattern
-- **Vector Store**: Qdrant for semantic similarity search
+- **Vector Store**: Qdrant or Pinecone for semantic similarity search
 - **Query Engine**: RAG pipeline with retrieval, diversification, and generation
 - **Database**: SQLite for storage of raw html articles and parsed content
 
@@ -143,7 +142,7 @@ The application follows **hexagonal architecture** (ports and adapters pattern) 
 src/w40k/
 ├── adapters/              # External service implementations
 │   ├── llm/              # OpenAI & Anthropic LLM clients
-│   └── vector_services/  # Qdrant vector service adapter
+│   └── vector_services/  # Vector service adapters (Qdrant, Pinecone)
 ├── config/               # Settings and dependency injection
 ├── core/                 # Domain models and types
 ├── infrastructure/       # Infrastructure services
@@ -159,6 +158,26 @@ src/w40k/
 
 scripts/                # Utility scripts for data processing
 ```
+
+## Ingestion (Embeddings)
+
+Generate embeddings from the SQLite chunk store and upsert them to the selected vector service.
+
+- Qdrant (local by default):
+```bash
+uv run python scripts/generate_embeddings.py --db data/articles.db --batch-size 100 --max-chunks 100
+```
+
+- Pinecone:
+```bash
+# In .env set: VECTOR_PROVIDER=pinecone, PINECONE_API_KEY=..., PINECONE_INDEX=...
+uv run python scripts/generate_embeddings.py --vector-provider pinecone --db data/articles.db --batch-size 100 --max-chunks 100
+```
+
+Flags:
+- `--force` recreates the collection/index before syncing
+- `--retry-failed` retries any chunks previously marked as failed
+- `--dry-run` shows what would be processed without calling APIs
 
 ## Testing
 

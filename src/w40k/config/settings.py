@@ -65,6 +65,25 @@ class Settings(BaseSettings):
         default="w40k_chunks", description="Qdrant collection name"
     )
 
+    # Vector Service Provider
+    vector_provider: str = Field(
+        default="qdrant",
+        description="Vector service provider: 'qdrant' or 'pinecone'",
+        validation_alias="VECTOR_PROVIDER",
+    )
+
+    # Pinecone Configuration (optional; used when vector_provider='pinecone')
+    pinecone_api_key: Optional[str] = Field(
+        default=None,
+        description="Pinecone API key",
+        validation_alias="PINECONE_API_KEY",
+    )
+    pinecone_index: Optional[str] = Field(
+        default=None,
+        description="Pinecone index name",
+        validation_alias="PINECONE_INDEX",
+    )
+
     # Database Configuration
     db_path: str = Field(
         default="data/articles.db",
@@ -169,6 +188,18 @@ class Settings(BaseSettings):
             return self.anthropic_timeout
         else:
             raise ValueError(f"Unsupported llm_provider: {self.llm_provider}")
+
+    def validate_vector_provider(self) -> None:
+        """Validate vector provider configuration when used."""
+        if self.vector_provider not in ["qdrant", "pinecone"]:
+            raise ValueError(
+                f"Unsupported vector_provider: {self.vector_provider}. Must be 'qdrant' or 'pinecone'"
+            )
+        if self.vector_provider == "pinecone":
+            if not (self.pinecone_api_key and self.pinecone_index):
+                raise ValueError(
+                    "Pinecone configuration requires PINECONE_API_KEY and PINECONE_INDEX"
+                )
 
 
 def get_settings() -> Settings:

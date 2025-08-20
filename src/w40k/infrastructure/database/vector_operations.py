@@ -1,4 +1,4 @@
-"""Vector operations for managing embeddings and Qdrant integration."""
+"""Vector operations for managing embeddings and vector service integration."""
 
 from __future__ import annotations
 
@@ -169,10 +169,10 @@ class VectorOperations:
             if batch_failed_chunks:
                 print(f"   ❌ Failed to generate {len(batch_failed_chunks)} embeddings")
 
-            # Store this batch in Qdrant if we have successful embeddings
+            # Store this batch in the vector service if we have successful embeddings
             if batch_successful_embeddings:
                 print(
-                    f"   📤 Uploading {len(batch_successful_embeddings)} embeddings to Qdrant..."
+                    f"   📤 Uploading {len(batch_successful_embeddings)} embeddings to vector service..."
                 )
                 batch_uploaded_count, batch_successful_point_ids = self.vector_service.upsert_chunks(
                     batch_successful_embeddings, batch_size=batch_size
@@ -193,7 +193,7 @@ class VectorOperations:
                                 chunk.has_embedding = False
                                 chunk.embedding_failed_count += 1
                                 chunk.last_embedding_error = (
-                                    f"Failed to upload to Qdrant at {datetime.now()}"
+                                    f"Failed to upload to vector service at {datetime.now()}"
                                 )
                                 session.add(chunk)
                         session.commit()
@@ -206,7 +206,7 @@ class VectorOperations:
         print(f"🎯 Total embeddings generated: {len(total_successful_embeddings):,}")
         if total_failed_chunks:
             print(f"❌ Total failed embeddings: {len(total_failed_chunks):,}")
-        print(f"📤 Total uploaded to Qdrant: {total_uploaded:,}")
+        print(f"📤 Total uploaded to vector service: {total_uploaded:,}")
 
         if not total_successful_embeddings:
             return {
@@ -266,7 +266,7 @@ class VectorOperations:
             active_only=active_only,
         )
 
-        # Search in Qdrant
+        # Search using active vector service
         return self.vector_service.search_similar_chunks(
             query_text=query_text,
             limit=limit,
@@ -283,7 +283,7 @@ class VectorOperations:
         Returns:
             Dictionary with embedding statistics
         """
-        # Get Qdrant stats
+        # Get vector service stats
         collection_info = self.vector_service.get_collection_info() or {}
         embeddings_count = int(collection_info.get("points_count", 0))
 
@@ -301,7 +301,7 @@ class VectorOperations:
             # SQLite available: calculate actual coverage
             coverage = (embeddings_count / active_chunks) * 100
         elif embeddings_count > 0:
-            # Qdrant-only mode: assume 100% coverage of available data
+            # Vector-service-only mode: assume 100% coverage of available data
             coverage = 100.0
         else:
             # No data available
@@ -329,7 +329,7 @@ class VectorOperations:
             print("ℹ️  SQLite not configured - skipping inactive cleanup")
             return 0
         
-        print("🧹 Finding inactive chunks to remove from Qdrant...")
+        print("🧹 Finding inactive chunks to remove from vector service...")
 
         with next(self.db_manager.get_session()) as session:
             inactive_chunks = session.exec(
@@ -357,7 +357,7 @@ class VectorOperations:
         retry_failed: bool = False,
         max_chunks: Optional[int] = None,
     ) -> Dict:
-        """Synchronize embeddings between SQLite and Qdrant.
+        """Synchronize embeddings between SQLite and the vector service.
 
         Args:
             force_recreate: If True, recreate all embeddings
@@ -370,7 +370,7 @@ class VectorOperations:
         if self.db_manager is None:
             raise RuntimeError("SQLite is not configured. This method requires database access.")
         
-        print("🔄 Synchronizing embeddings between SQLite and Qdrant...")
+        print("🔄 Synchronizing embeddings between SQLite and vector service...")
 
         if force_recreate:
             print("🗑️  Force recreate: clearing existing collection...")
@@ -389,13 +389,11 @@ class VectorOperations:
 
         # Ensure collection exists
         if not self.vector_service.create_collection():
-            return {"error": "Failed to create Qdrant collection"}
+            return {"error": "Failed to create vector collection"}
 
         # Get statistics before sync
         before_stats = self.get_embedding_stats()
-        print(
-            f"📊 Before sync: {before_stats['embeddings_in_qdrant']:,} embeddings in Qdrant"
-        )
+        print(f"📊 Before sync: {before_stats['embeddings_in_qdrant']:,} embeddings in vector service")
 
         # Generate embeddings for missing chunks
         sync_stats = self.generate_and_store_embeddings(
@@ -407,9 +405,7 @@ class VectorOperations:
 
         # Get statistics after sync
         after_stats = self.get_embedding_stats()
-        print(
-            f"📊 After sync: {after_stats['embeddings_in_qdrant']:,} embeddings in Qdrant"
-        )
+        print(f"📊 After sync: {after_stats['embeddings_in_qdrant']:,} embeddings in vector service")
         print(f"📈 Coverage: {after_stats['coverage_percentage']:.1f}%")
 
         return {

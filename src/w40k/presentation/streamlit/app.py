@@ -77,7 +77,7 @@ def get_answer_service():
 
     except Exception as e:
         st.error(f"❌ **Initialization Error**: {str(e)}")
-        st.info("Please check your Qdrant connection and environment variables.")
+        st.info("Please check your vector service connection and environment variables.")
         st.stop()
 
 

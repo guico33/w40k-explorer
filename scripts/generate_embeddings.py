@@ -18,6 +18,7 @@ from w40k.infrastructure.database.connection import DatabaseManager
 from w40k.infrastructure.database.vector_operations import VectorOperations
 from w40k.infrastructure.rag.embeddings import EmbeddingGenerator
 from w40k.adapters.vector_services.qdrant_service import QdrantVectorService
+from w40k.adapters.vector_services.pinecone_service import PineconeVectorService
 
 # Initialize settings
 try:
@@ -45,6 +46,7 @@ def generate_embeddings(
     force_recreate: bool = False,
     retry_failed: bool = False,
     dry_run: bool = False,
+    vector_provider: Optional[str] = None,
 ):
     """Generate embeddings for chunks and store in Qdrant.
 
@@ -101,36 +103,51 @@ def generate_embeddings(
         print(f"❌ Failed to initialize OpenAI client: {e}")
         return 1
 
-    # Qdrant Vector Service
+    # Vector Service (Qdrant or Pinecone)
     try:
-        if settings.is_qdrant_cloud():
-            vector_service = QdrantVectorService(
+        vp = (vector_provider or settings.vector_provider or "qdrant").lower()
+        if vp == "qdrant":
+            if settings.is_qdrant_cloud():
+                vector_service = QdrantVectorService(
+                    embedding_generator,
+                    collection_name=collection_name,
+                    url=settings.qdrant_url,
+                    api_key=settings.qdrant_api_key,
+                    vector_size=vector_size,
+                )
+            else:
+                vector_service = QdrantVectorService(
+                    embedding_generator,
+                    collection_name=collection_name,
+                    host=qdrant_host,
+                    port=qdrant_port,
+                    vector_size=vector_size,
+                )
+        elif vp == "pinecone":
+            if not settings.pinecone_api_key or not settings.pinecone_index:
+                print("❌ Missing Pinecone configuration (PINECONE_API_KEY, PINECONE_INDEX)")
+                return 1
+            vector_service = PineconeVectorService(
                 embedding_generator,
-                collection_name=collection_name,
-                url=settings.qdrant_url,
-                api_key=settings.qdrant_api_key,
+                api_key=settings.pinecone_api_key,
+                index_name=settings.pinecone_index,
                 vector_size=vector_size,
+                metric="cosine",
             )
         else:
-            vector_service = QdrantVectorService(
-                embedding_generator,
-                collection_name=collection_name,
-                host=qdrant_host,
-                port=qdrant_port,
-                vector_size=vector_size,
-            )
+            print(f"❌ Unsupported vector provider: {vp}")
+            return 1
 
         # Health check
         if not vector_service.health_check():
-            print(
-                "❌ Qdrant is not accessible. Please start Qdrant server or check connection."
-            )
+            print("❌ Vector service is not accessible. Check connection and credentials.")
             return 1
 
-        print("✅ Connected to Qdrant")
+        provider_label = "Pinecone" if vp == "pinecone" else "Qdrant"
+        print(f"✅ Connected to vector service ({provider_label})")
 
     except Exception as e:
-        print(f"❌ Failed to connect to Qdrant: {e}")
+        print(f"❌ Failed to initialize vector service: {e}")
         return 1
 
     # Vector Operations
@@ -140,7 +157,7 @@ def generate_embeddings(
     print("\n📊 Current Statistics:")
     stats = vector_ops.get_embedding_stats()
     print(f"   SQLite chunks (active): {stats['active_chunks_sqlite']:,}")
-    print(f"   Qdrant embeddings: {stats['embeddings_in_qdrant']:,}")
+    print(f"   {provider_label} embeddings: {stats['embeddings_in_qdrant']:,}")
     print(f"   Coverage: {stats['coverage_percentage']:.1f}%")
 
     if stats["coverage_percentage"] >= 99.9 and not force_recreate:
@@ -230,9 +247,7 @@ def generate_embeddings(
 
         final_stats = results.get("after_stats", {})
         print(f"\n🎯 Final Coverage: {final_stats.get('coverage_percentage', 0):.1f}%")
-        print(
-            f"📊 Total embeddings in Qdrant: {final_stats.get('embeddings_in_qdrant', 0):,}"
-        )
+        print(f"📊 Total embeddings in {provider_label}: {final_stats.get('embeddings_in_qdrant', 0):,}")
 
         # Usage statistics
         if "api_calls" in sync_stats:
@@ -245,7 +260,7 @@ def generate_embeddings(
         # Collection info
         collection_info = sync_stats.get("collection_info", {})
         if collection_info:
-            print(f"\n🗄️  Qdrant Collection Info:")
+            print(f"\n🗄️  {provider_label} Collection Info:")
             print(f"   Status: {collection_info.get('status', 'unknown')}")
             print(f"   Vector size: {collection_info.get('vector_size', 0)}")
             print(f"   Distance metric: {collection_info.get('distance', 'unknown')}")
@@ -277,13 +292,20 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Generate embeddings and store in Qdrant"
+        description="Generate embeddings and store in vector DB (Qdrant/Pinecone)"
     )
 
     # Database options
     parser.add_argument("--db", default="data/articles.db", help="SQLite database path")
 
-    # Qdrant options
+    # Vector provider options
+    parser.add_argument(
+        "--vector-provider",
+        choices=["qdrant", "pinecone"],
+        help="Override vector provider (defaults to VECTOR_PROVIDER/.env)",
+    )
+
+    # Qdrant options (used when provider=qdrant)
     parser.add_argument(
         "--collection", default="w40k_chunks", help="Qdrant collection name"
     )
@@ -330,6 +352,7 @@ def main():
         force_recreate=args.force,
         retry_failed=args.retry_failed,
         dry_run=args.dry_run,
+        vector_provider=args.vector_provider,
     )
 
 
