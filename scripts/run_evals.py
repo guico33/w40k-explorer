@@ -9,12 +9,11 @@ Usage examples:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -28,7 +27,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from w40k.config.factory import create_answer_service, create_llm_client
-from w40k.config.settings import Settings, get_settings
+from w40k.config.settings import get_settings
 from w40k.evals.dataset import load_jsonl, take_subset
 from w40k.evals.judges import judge_groundedness, judge_relevance
 from w40k.evals.metrics import citations_valid as metric_citations_valid
@@ -70,8 +69,8 @@ def _is_refusal(answer_text: str) -> bool:
 
 
 def _process_single_item(
-    item, answer_service, judge_client, eval_model, start_time
-) -> Dict[str, Any]:
+    item, answer_service, judge_client, eval_model
+) -> Optional[Dict[str, Any]]:
     """Process a single evaluation item.
 
     Args:
@@ -79,7 +78,6 @@ def _process_single_item(
         answer_service: Service for generating answers
         judge_client: LLM client for judges
         eval_model: Model name for evaluation
-        start_time: Start time for logging
 
     Returns:
         Dict with evaluation results
@@ -89,7 +87,7 @@ def _process_single_item(
         return text if len(text) <= max_len else text[: max_len - 1] + "…"
 
     try:
-        start_dt = datetime.utcnow()
+        start_dt = datetime.now(timezone.utc)
         logging.info(
             "START id=%s at=%s question=%s",
             item.id,
@@ -135,7 +133,7 @@ def _process_single_item(
     relevant_bool = bool(relevance.get("relevant", False))
     refusal = _is_refusal(answer_text)
 
-    end_dt = datetime.utcnow()
+    end_dt = datetime.now(timezone.utc)
     elapsed_ms = int((end_dt - start_dt).total_seconds() * 1000)
     logging.info(
         "END   id=%s at=%s ms=%s json_ok=%s cite_valid=%s cov=%.2f grounded=%s relevant=%s refusal=%s conf=%.2f",
@@ -261,7 +259,7 @@ def main() -> int:
         print("No samples to evaluate.")
         return 0
 
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     outdir = (
         Path(args.outdir) / f"{ts}_{settings.llm_provider}_{settings.vector_provider}"
     )
@@ -293,8 +291,6 @@ def main() -> int:
             tqdm = None
 
         # Process items in parallel using ThreadPoolExecutor
-        start_time = datetime.utcnow()
-
         # Use ThreadPoolExecutor for I/O bound operations (API calls)
         with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
             # Submit all tasks
@@ -305,7 +301,6 @@ def main() -> int:
                     answer_service,
                     judge_client,
                     eval_model,
-                    start_time,
                 ): item
                 for item in dataset
             }

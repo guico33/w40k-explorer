@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Test script for embedding generation and Qdrant integration."""
+"""Test script for embedding generation and vector service integration (Qdrant/Pinecone)."""
 
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, cast
 
 from dotenv import load_dotenv
 
@@ -13,19 +13,20 @@ load_dotenv()
 # Add src to path for new architecture
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from w40k.adapters.vector_services.pinecone_service import PineconeVectorService
+from w40k.adapters.vector_services.qdrant_service import QdrantVectorService
 from w40k.config.settings import get_settings
 from w40k.infrastructure.database.connection import DatabaseManager
 from w40k.infrastructure.rag.embeddings import (
     EmbeddingGenerator,
     validate_embedding_dimensions,
 )
-from w40k.adapters.vector_services.qdrant_service import QdrantVectorService
 
 
 def test_embeddings():
-    """Test embedding generation and Qdrant integration on sample chunks."""
+    """Test embedding generation and vector service integration on sample chunks."""
 
-    print("🧪 Testing Embedding Generation & Qdrant Integration")
+    print("🧪 Testing Embedding Generation & Vector Service Integration")
     print("=" * 60)
 
     # Initialize database
@@ -101,35 +102,51 @@ def test_embeddings():
     print(f"   Success rate: {stats['success_rate']:.1f}%")
     print(f"   Avg tokens per chunk: {stats['avg_tokens_per_chunk']:.1f}")
 
-    # Test Qdrant integration
-    print("\n🗄️  Testing Qdrant integration...")
+    # Test vector service integration
+    provider = (settings.vector_provider or "qdrant").lower()
+    print(f"\n🗄️  Testing {provider.title()} integration...")
 
     try:
-        if settings.is_qdrant_cloud():
-            vector_service = QdrantVectorService(
+        if provider == "pinecone":
+            if not settings.pinecone_api_key or not settings.pinecone_index:
+                print(
+                    "⚠️  Missing Pinecone configuration (PINECONE_API_KEY, PINECONE_INDEX); skipping"
+                )
+                return 0
+            vector_service = PineconeVectorService(
                 embedding_generator,
-                collection_name="test_w40k_chunks",
-                url=settings.qdrant_url,
-                api_key=settings.qdrant_api_key,
+                api_key=settings.pinecone_api_key,
+                index_name="test_w40k_chunks",
                 vector_size=1536,
+                metric="cosine",
             )
         else:
-            vector_service = QdrantVectorService(
-                embedding_generator,
-                collection_name="test_w40k_chunks",
-                host=settings.qdrant_host,
-                port=settings.qdrant_port,
-                vector_size=1536,
-            )
+            # Default to Qdrant
+            if settings.is_qdrant_cloud():
+                vector_service = QdrantVectorService(
+                    embedding_generator,
+                    collection_name="test_w40k_chunks",
+                    url=settings.qdrant_url,
+                    api_key=settings.qdrant_api_key,
+                    vector_size=1536,
+                )
+            else:
+                vector_service = QdrantVectorService(
+                    embedding_generator,
+                    collection_name="test_w40k_chunks",
+                    host=settings.qdrant_host,
+                    port=settings.qdrant_port,
+                    vector_size=1536,
+                )
 
         if not vector_service.health_check():
-            print("⚠️  Qdrant not available - skipping vector store tests")
+            print("⚠️  Vector service not available - skipping vector store tests")
             return 0
 
-        print("✅ Connected to Qdrant")
+        print(f"✅ Connected to {provider.title()}")
 
     except Exception as e:
-        print(f"⚠️  Qdrant connection failed: {e}")
+        print(f"⚠️  {provider.title()} connection failed: {e}")
         return 0
 
     # Create test collection
@@ -141,15 +158,13 @@ def test_embeddings():
     print("✅ Created test collection")
 
     # Upload embeddings (filter out None embeddings)
-    print("📤 Uploading embeddings to Qdrant...")
-    valid_chunks_with_embeddings = [
-        (chunk, embedding)
+    print(f"📤 Uploading embeddings to {provider.title()}...")
+    typed_for_upsert = [
+        (chunk, cast(List[float], embedding))
         for chunk, embedding in chunks_with_embeddings
         if embedding is not None
     ]
-    uploaded_count, _ = vector_service.upsert_chunks(
-        valid_chunks_with_embeddings, batch_size=5
-    )
+    uploaded_count, _ = vector_service.upsert_chunks(cast(List, typed_for_upsert), batch_size=5)
 
     if uploaded_count != successful_count:
         print(f"⚠️  Only {uploaded_count}/{successful_count} embeddings uploaded")
