@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Script to generate embeddings and store them in Qdrant vector database."""
+"""Script to generate embeddings and store them in the configured vector database."""
 
 import sys
 from pathlib import Path
@@ -48,13 +48,13 @@ def generate_embeddings(
     dry_run: bool = False,
     vector_provider: Optional[str] = None,
 ):
-    """Generate embeddings for chunks and store in Qdrant.
+    """Generate embeddings for chunks and store in the vector database.
 
     Args:
         db_path: Path to SQLite database
-        collection_name: Qdrant collection name
-        qdrant_host: Qdrant host (for local deployment)
-        qdrant_port: Qdrant port (for local deployment)
+        collection_name: Vector collection/index name (Qdrant)/index (Pinecone)
+        qdrant_host: Qdrant host (local deployment)
+        qdrant_port: Qdrant port (local deployment)
         batch_size: Batch size for processing
         max_chunks: Maximum chunks to process (for testing)
         force_recreate: Recreate collection and all embeddings
@@ -64,8 +64,7 @@ def generate_embeddings(
     Environment variables required:
         OPENAI_API_KEY: OpenAI API key
         EMBEDDING_MODEL: OpenAI embedding model to use
-        QDRANT_URL: Qdrant cloud URL (optional, overrides host/port)
-        QDRANT_API_KEY: Qdrant cloud API key (optional)
+        QDRANT_URL/QDRANT_API_KEY (Qdrant cloud) or PINECONE_API_KEY/PINECONE_INDEX (Pinecone)
     """
     print("🚀 Warhammer 40k Embedding Generator")
     print("=" * 50)

@@ -119,16 +119,16 @@ class ScrapingSession(SQLModel, table=True, extend_existing=True):
 
 class Chunk(SQLModel, table=True, extend_existing=True):
     """
-    Structure-aware chunk suitable for embedding + Qdrant payload.
+    Structure-aware chunk suitable for embedding + vector-store payload.
 
     Store the minimal text needed for rendering/debug (`text`) and the
     exact string you embed (`embedding_input`) if you want perfect reproducibility.
-    Use `chunk_uid` as the deterministic ID (also use as Qdrant point ID).
+    Use `chunk_uid` as the deterministic ID (e.g., for vector-store point IDs).
     """
 
     id: Optional[int] = Field(default=None, primary_key=True)
 
-    # Deterministic ID for idempotent upserts (also Qdrant point ID)
+    # Deterministic ID for idempotent upserts (mirrors vector-store point IDs)
     chunk_uid: str = Field(index=True, unique=True)
 
     # Foreign key & denorm for fast filtering

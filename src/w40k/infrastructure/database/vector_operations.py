@@ -27,7 +27,7 @@ class VectorOperations:
         """Initialize vector operations.
 
         Args:
-            db_manager: Database manager for SQLite operations (None for Qdrant-only mode)
+            db_manager: Database manager for SQLite operations (None for vector-store–only mode)
             vector_service: Unified vector service instance
             embedding_generator: Embedding generator instance
         """
@@ -78,7 +78,7 @@ class VectorOperations:
         max_chunks: Optional[int] = None,
         retry_failed: bool = False,
     ) -> Dict:
-        """Generate embeddings for chunks and store them in Qdrant.
+        """Generate embeddings for chunks and store them in the vector database.
 
         Args:
             chunks: Specific chunks to process (if None, get chunks needing embeddings)
