@@ -1,4 +1,4 @@
-"""Centralized configuration settings for the W40K Knowledge Base."""
+"""Centralized configuration settings for W40K Explorer."""
 
 from pathlib import Path
 from typing import Optional

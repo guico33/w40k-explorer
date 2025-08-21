@@ -59,47 +59,62 @@ def extract_citation_order_from_text(answer: str) -> List[int]:
 
 
 def remap_citations_in_text(answer: str, id_mapping: Dict[int, int]) -> str:
-    """Remap citation numbers in answer text using provided mapping.
+    """Remap citation markers in the answer text using the provided mapping.
 
-    Accepts both `[id:NUMBER]` and `[NUMBER]` in the original text and outputs
-    normalized `[NUMBER]` with sequential IDs.
+    Accepts both `[id:NUMBER]` and `[NUMBER]` and rewrites to normalized
+    sequential `[NUMBER]` based on the mapping of original context IDs to
+    display order. Uses regex to remap per‑occurrence and avoid partial matches.
+
+    Args:
+        answer: The generated answer containing citation markers.
+        id_mapping: Mapping from original context id -> sequential display id.
+
+    Returns:
+        Answer text with citation markers remapped to `[1]..[n]`.
     """
-    remapped = answer
-    for original_id, sequential_id in id_mapping.items():
-        # Replace tagged form first to avoid double-touching
-        remapped = remapped.replace(f"[id:{original_id}]", f"[{sequential_id}]")
-        # Replace bare form
-        remapped = remapped.replace(f"[{original_id}]", f"[{sequential_id}]")
-    return remapped
+    pattern = re.compile(r"\[(?:id:)?(\d+)\]")
+
+    def _repl(match: re.Match[str]) -> str:
+        try:
+            original = int(match.group(1))
+        except Exception:
+            return match.group(0)
+        new = id_mapping.get(original)
+        return f"[{new}]" if new is not None else match.group(0)
+
+    return pattern.sub(_repl, answer)
 
 
 def format_single_source(citation: Dict, sequential_id: int) -> str:
-    """Format a single citation source with sequential numbering.
+    """Format a single citation source with sequential numbering and anchor.
+
+    Outputs HTML so we can set an in-page anchor target (id="ref-N") that
+    superscript citation links can jump to, and a clickable external link.
 
     Args:
         citation: Citation dictionary with title, section, url, etc.
         sequential_id: Sequential number to display (1, 2, 3, etc.)
 
     Returns:
-        Formatted source string with number and clickable link
+        HTML string with an in-page anchor and a clickable external link.
     """
     title = citation.get("title", "Unknown")
     section = citation.get("section", "")
     url = citation.get("url", "")
 
     # Create display text
+    display_text = f"{title}"
     if section:
-        source_text = f"**{title}** › {section}"
-    else:
-        source_text = f"**{title}**"
+        display_text = f"{title} › {section}"
 
     # Add URL with section anchor if available
+    link_html = display_text
     if url:
         final_url = create_url_with_fragment(url, section)
-        source_text = f"[{source_text}]({final_url})"
+        link_html = f'<a href="{final_url}" target="_blank" rel="noopener noreferrer">{display_text}</a>'
 
-    # Add sequential number
-    return f"**[{sequential_id}]** {source_text}"
+    # Include an in-page anchor target so superscripts can link here
+    return f'<span id="ref-{sequential_id}"></span><strong>[{sequential_id}]</strong> {link_html}'
 
 
 def format_sources_with_sequential_numbering(
@@ -124,18 +139,39 @@ def format_sources_with_sequential_numbering(
     if not citations:
         return answer, "No sources available"
 
-    # Prefer the order provided by citations list (already reflects citations_used)
-    # Build mapping: original context id -> sequential display id
+    # Determine ordering of citations by appearance in the answer.
+    # This makes the remapped [1], [2], ... align with the first time each
+    # citation id appears in the text (Wikipedia-like behavior).
+    order_in_text = extract_citation_order_from_text(answer)
+
+    # Map id -> citation (first matching entry wins); keep original list for fallbacks
+    by_id: Dict[int, Dict] = {}
+    for c in citations:
+        cid = c.get("id")
+        if isinstance(cid, int) and cid not in by_id:
+            by_id[cid] = c
+
+    # Build final ordered list: first those that appear in text, then any remaining
+    ordered: List[Dict] = []
+    seen_ids: set[int] = set()
+    for cid in order_in_text:
+        if cid in by_id and cid not in seen_ids:
+            ordered.append(by_id[cid])
+            seen_ids.add(cid)
+    for c in citations:
+        cid = c.get("id")
+        if isinstance(cid, int) and cid not in seen_ids:
+            ordered.append(c)
+            seen_ids.add(cid)
+
+    # Build mapping: original context id -> sequential display id (1-based)
     original_to_seq: Dict[int, int] = {}
     formatted_sources: List[str] = []
-
-    for idx, citation in enumerate(citations, start=1):
+    for idx, citation in enumerate(ordered, start=1):
         cid = citation.get("id")
-        if cid is None:
-            # Skip items without an id
-            continue
-        original_to_seq[int(cid)] = idx
-        formatted_sources.append(format_single_source(citation, idx))
+        if isinstance(cid, int):
+            original_to_seq[cid] = idx
+            formatted_sources.append(format_single_source(citation, idx))
 
     # Remap in-text citations to sequential [1], [2], ...
     remapped_answer = remap_citations_in_text(answer, original_to_seq)
@@ -144,3 +180,91 @@ def format_sources_with_sequential_numbering(
     sources_text = separator.join(formatted_sources)
 
     return remapped_answer, sources_text
+
+
+def style_citation_superscripts(text: str) -> str:
+    """Render in-text numeric citations like "[1]" as HTML superscripts.
+
+    Converts bare numeric markers to `<sup class="citation-sup">[n]</sup>` while
+    avoiding Markdown link syntax like `[label](url)`. Intended for display only;
+    does not change underlying citation mapping.
+
+    Args:
+        text: Rendered answer text with `[1]`, `[2]`, ... citation markers.
+
+    Returns:
+        HTML string with superscripted citation markers.
+    """
+
+    # Match [digits] not immediately followed by '(' to avoid Markdown links.
+    pattern = re.compile(r'\[(\d+)\](?!\()')
+    # Wrap the superscript in an anchor linking to the in-page source target
+    return pattern.sub(r'<a class="citation-link" href="#ref-\1"><sup class="citation-sup">[\1]</sup></a>', text)
+
+
+def build_seq_to_url_map(answer: str, citations: List[Dict]) -> Dict[int, str]:
+    """Build a mapping from sequential citation number to external URL (with fragment).
+
+    Orders citations by first appearance in the answer, then appends any remaining.
+
+    Args:
+        answer: Answer text containing citation markers.
+        citations: List of citation dicts with keys: id, title, section, url.
+
+    Returns:
+        Mapping from sequential number (1-based) to final external URL string.
+    """
+    order_in_text = extract_citation_order_from_text(answer)
+    by_id: Dict[int, Dict] = {}
+    for c in citations:
+        cid = c.get("id")
+        if isinstance(cid, int) and cid not in by_id:
+            by_id[cid] = c
+
+    ordered: List[Dict] = []
+    seen: set[int] = set()
+    for cid in order_in_text:
+        if cid in by_id and cid not in seen:
+            ordered.append(by_id[cid])
+            seen.add(cid)
+    for c in citations:
+        cid = c.get("id")
+        if isinstance(cid, int) and cid not in seen:
+            ordered.append(c)
+            seen.add(cid)
+
+    seq_to_url: Dict[int, str] = {}
+    for idx, c in enumerate(ordered, start=1):
+        url = c.get("url") or ""
+        section = c.get("section") or ""
+        if url:
+            seq_to_url[idx] = create_url_with_fragment(url, section)
+    return seq_to_url
+
+
+def style_citation_superscripts_with_links(text: str, seq_to_url: Dict[int, str]) -> str:
+    """Render in-text citations as superscripts linked to external sources.
+
+    If a sequential number doesn't have a URL in the mapping, the marker is left
+    unchanged.
+
+    Args:
+        text: The remapped answer text containing [1]..[n].
+        seq_to_url: Mapping from sequential number to external URL.
+
+    Returns:
+        HTML string with superscripted, clickable citations.
+    """
+    pattern = re.compile(r'\[(\d+)\](?!\()')
+
+    def _repl(m: re.Match[str]) -> str:
+        try:
+            n = int(m.group(1))
+        except Exception:
+            return m.group(0)
+        href = seq_to_url.get(n)
+        if not href:
+            return m.group(0)
+        return f'<a class="citation-link" href="{href}" target="_blank" rel="noopener noreferrer"><sup class="citation-sup">[{n}]</sup></a>'
+
+    return pattern.sub(_repl, text)

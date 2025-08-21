@@ -1,4 +1,4 @@
-"""Streamlit app for the W40K Knowledge Base - New Architecture.
+"""Streamlit app for W40K Explorer - New Architecture.
 
 Supports running as a script by falling back to add `<repo>/src` to sys.path
 when the `w40k` package is not importable.
@@ -21,6 +21,9 @@ try:
     from w40k.core.models import QueryResult
     from w40k.presentation.streamlit.utils import (
         format_sources_with_sequential_numbering,
+        style_citation_superscripts_with_links,
+        build_seq_to_url_map,
+        format_single_source,
     )
 except Exception:
     src_dir = Path(__file__).resolve().parents[4]  # <repo>/src
@@ -30,6 +33,9 @@ except Exception:
     from w40k.core.models import QueryResult
     from w40k.presentation.streamlit.utils import (
         format_sources_with_sequential_numbering,
+        style_citation_superscripts_with_links,
+        build_seq_to_url_map,
+        format_single_source,
     )
 
 
@@ -216,6 +222,38 @@ def add_background_image():
             font-size: 1.15rem !important;
             line-height: 1.6 !important;
         }}
+
+        /* Superscript citation markers (styled as links) */
+        .citation-link,
+        .citation-link:link,
+        .citation-link:visited,
+        .citation-link:hover,
+        .citation-link:active {{
+            text-decoration: none !important;
+            border-bottom: none !important;
+            color: var(--w40k-gold) !important;
+        }}
+        .citation-link .citation-sup {{
+            text-decoration: none !important;
+            border-bottom: none !important;
+        }}
+        .citation-sup {{
+            vertical-align: super;
+            font-size: 0.75em;
+            line-height: 0;
+            color: var(--w40k-gold) !important;
+            font-weight: 700 !important;
+            margin-left: 1px;
+        }}
+
+        /* Make all links inside chat messages gold (includes Sources and Passages) */
+        .stChatMessage a,
+        .stChatMessage a:link,
+        .stChatMessage a:visited,
+        .stChatMessage a:hover,
+        .stChatMessage a:active {{
+            color: var(--w40k-gold) !important;
+        }}
         
         /* Mobile Responsiveness */
         @media (max-width: 768px) {{
@@ -269,7 +307,7 @@ def disable_anchor_scroll_behavior():
           function isHashLink(el) { return el && el.getAttribute && /^#/.test(el.getAttribute('href')||''); }
           document.addEventListener('click', function(ev){
             var a = ev.target.closest ? ev.target.closest('a') : null;
-            if (isHashLink(a)) {
+            if (isHashLink(a) && !(a.classList && a.classList.contains('citation-link'))) {
               ev.preventDefault();
               return false;
             }
@@ -287,7 +325,7 @@ def disable_anchor_scroll_behavior():
 def initialize_app():
     """Initialize the Streamlit app."""
     st.set_page_config(
-        page_title="Warhammer 40K Knowledge Base",
+        page_title="Warhammer 40K Explorer",
         page_icon="🏛️",
         layout="wide",
         initial_sidebar_state="collapsed",
@@ -298,7 +336,7 @@ def initialize_app():
     # Disable anchor scroll behavior to avoid jumpy expanders/headings
     disable_anchor_scroll_behavior()
 
-    st.title("Warhammer 40K Knowledge Base")
+    st.title("Warhammer 40K Explorer")
     st.markdown("*Ask any question about the grim darkness of the far future...*")
 
     # Validate environment
@@ -371,7 +409,10 @@ def _render_assistant_output(answer_text: str, result: QueryResult) -> None:
     remapped_answer, sources_text = format_sources_with_sequential_numbering(
         answer_text, result.citations
     )
-    st.markdown(remapped_answer)
+    # Build mapping from sequential number -> external URL
+    seq_to_url = build_seq_to_url_map(answer_text, result.citations)
+    styled_answer = style_citation_superscripts_with_links(remapped_answer, seq_to_url)
+    st.markdown(styled_answer, unsafe_allow_html=True)
 
     # Display sources inline (as before)
     book_icon = get_themed_icon("book", size=24)
@@ -379,7 +420,7 @@ def _render_assistant_output(answer_text: str, result: QueryResult) -> None:
     if not result.citations and not getattr(result, "citations_used", []):
         st.info("Sources unavailable: structured output missing or invalid JSON.")
     else:
-        st.markdown(sources_text)
+        st.markdown(sources_text, unsafe_allow_html=True)
 
     # Collapsible: show full passages matching the same numbering as sources
     if getattr(result, "context_items", None) and result.citations:
@@ -396,11 +437,18 @@ def _render_assistant_output(answer_text: str, result: QueryResult) -> None:
                     if isinstance(cid, int) and 0 <= cid < len(result.context_items):
                         ctx = result.context_items[cid]
                         seq = id_to_seq.get(cid, i + 1)
-                        st.markdown(
-                            f"**[{seq}] {ctx['article']}** › {ctx['section']}\n\n{ctx['text']}\n\n"
+                        # Format header like Sources (with linked title/section)
+                        header_html = format_single_source(
+                            {
+                                "id": cid,
+                                "title": c.get("title", ctx.get("article", "Unknown")),
+                                "section": c.get("section", ctx.get("section", "")),
+                                "url": c.get("url", ctx.get("url", "")),
+                            },
+                            seq,
                         )
-                        if ctx.get("url"):
-                            st.markdown(f"[Link]({ctx['url']})")
+                        st.markdown(header_html, unsafe_allow_html=True)
+                        st.markdown(ctx.get("text", ""))
 
     # Display metadata
     metadata_text = (
